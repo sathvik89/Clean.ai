@@ -101,3 +101,4 @@ LangGraph (planned for orchestration)
 Vision
 
 Clean.ai aims to bridge the gap between manual data cleaning workflows and intelligent automation. It enables users to work with data more efficiently while maintaining control, accuracy, and transparency.
+
