@@ -20,7 +20,8 @@ class AgentState(TypedDict):
     # agent outputs
     analysis_report: str
     cleaning_plan: str
-    audit_report: Dict[str, Any] # results of the data audit
+    audit_report: Dict[str, Any]
+    work_summary: str # rolling summary of all cleaning actions taken
     
     # flow control
     is_clean: bool
