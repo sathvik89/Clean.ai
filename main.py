@@ -36,8 +36,20 @@ def main():
         "user_context": user_context,
         "analysis_report": "",
         "cleaning_plan": "",
+        "audit_report": {},
+        "validation_profile": {},
+        "work_summary": "",
+        "validation_feedback": "",
+        "run_error": "",
         "logs": [],
         "is_clean": False,
+        "tool_rounds": 0,
+        "max_tool_rounds": 12,
+        "validation_rounds": 0,
+        "max_validation_rounds": 6,
+        "validation_signature": "",
+        "stagnation_rounds": 0,
+        "max_stagnation_rounds": 2,
         "messages": []
     }
 
