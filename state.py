@@ -21,9 +21,19 @@ class AgentState(TypedDict):
     analysis_report: str
     cleaning_plan: str
     audit_report: Dict[str, Any]
+    validation_profile: Dict[str, Any]
     work_summary: str # rolling summary of all cleaning actions taken
+    validation_feedback: str
+    run_error: str
     
     # flow control
     is_clean: bool
+    tool_rounds: int
+    max_tool_rounds: int
+    validation_rounds: int
+    max_validation_rounds: int
+    validation_signature: str
+    stagnation_rounds: int
+    max_stagnation_rounds: int
     logs: Annotated[List[str], update_logs]
     messages: Annotated[List, operator.add]
