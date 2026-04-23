@@ -160,13 +160,13 @@ Stagnation detection (stops if no progress), round limits (max 6 tool rounds, ma
 
 1. **Clone Repository**
    ```bash
-   git clone https://github.com/yourusername/agentic-data-cleaning.git
+   git clone https://github.com/sathvik89/agentic-data-cleaning.git
    cd agentic-data-cleaning
    ```
 
 2. **Create Virtual Environment**
    ```bash
-   python -m venv venv
+   python3 -m venv venv
    source venv/bin/activate  # On Windows: venv\Scripts\activate
    ```
 
@@ -177,7 +177,7 @@ Stagnation detection (stops if no progress), round limits (max 6 tool rounds, ma
 
 4. **Verify Installation**
    ```bash
-   python -c "import pandas, langchain, langgraph, groq; print('✓ All dependencies installed')"
+   python3 -c "import pandas, langchain, langgraph, groq; print('✓ All dependencies installed')"
    ```
 
 ### requirements.txt
