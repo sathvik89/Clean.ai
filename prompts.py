@@ -26,6 +26,8 @@ examine the data summary carefully. look for:
 - missing values (note which columns have them and how many).
 - data type mismatches (e.g., why is a numeric column detected as an 'object'?).
 - duplicates (especially in key fields like emails or IDs).
+- identifier-style columns where duplicate values should likely be treated as record conflicts.
+- impossible values and rule violations (e.g., age < 0, age > 120, salary < 0, future join dates, invalid emails).
 - outliers that might be errors (e.g., age = 120 or age = 'unknown').
 
 provide a detailed report of what needs fixing to achieve the user's goal.
@@ -39,7 +41,7 @@ analysis report: {analysis_report}
 rules for your plan:
 1. handle mixed types first (convert everything to its logical type using smart tools).
 2. fix missing values after types are corrected.
-3. remove duplicates based on relevant columns.
+3. remove duplicates based on relevant key columns such as ids or emails when appropriate.
 4. standardize text (strip whitespace, unify casing).
 5. ensure the final schema is ready for {user_context}.
 
@@ -50,30 +52,17 @@ EXECUTOR_PROMPT = """
 you are an expert automation agent. your task is to execute the cleaning plan using your tools.
 user's goal: {user_context}
 current plan: {cleaning_plan}
+latest validation feedback: {validation_feedback}
 
 important instructions:
+- if validation feedback says a problem still remains, prioritize fixing exactly that issue before repeating old steps.
+- only use supported missing-value strategies: `drop`, `constant`, `mean`, `median`, `mode`, `interpolate`.
+- if you see impossible numeric values such as negative ages or extremely unrealistic ages, convert them to missing values first, then fill them appropriately.
+- if you see invalid emails or impossible dates, repair them with custom pandas logic or set them to missing before a follow-up cleanup step.
 - always call 'tool_get_summary' after major changes to see the impact.
 - if a tool call fails or doesn't fix the issue (e.g., missing values still exist), try a different approach or parameter.
-- use 'tool_smart_type_conversion' early to fix columns that have mixed strings and numbers.
+- use 'tool_type_conversion' early to fix columns that have mixed strings and numbers.
 - be careful with 'tool_execute_custom_pandas'—only use it for complex logic that standard tools can't handle.
 
 work through the plan methodically. log every action clearly.
-"""
-
-VALIDATOR_PROMPT = """
-you are the final quality auditor. your job is to ensure the data is 100% clean and matches the user's goal.
-user's goal: {user_context}
-audit report: {audit_report}
-
-examine the audit report. 
-- are there still missing values in critical columns?
-- are there any remaining duplicates?
-- are the data types correct for {user_context}?
-
-if issues remain:
-set 'is_clean' to false and explain exactly what is wrong and what the executor needs to do next.
-if perfectly clean:
-set 'is_clean' to true and provide a final success summary.
-
-you must be strict. do not settle for 'mostly clean'.
 """
