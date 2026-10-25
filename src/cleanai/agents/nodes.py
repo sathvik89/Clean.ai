@@ -300,7 +300,12 @@ def tool_handler_node(state: AgentState) -> Dict[str, Any]:
                 step["status"] = "blocked"
                 step["result"] = result.message[:140]
                 step_index += 1
-            elif result.status == "error" or result.status == "noop":
+            elif result.status == "noop":
+                # the data is already in the state this step wanted - move on
+                step["status"] = "done"
+                step["result"] = "no change needed"
+                step_index += 1
+            elif result.status == "error":
                 step["attempts"] = step.get("attempts", 0) + 1
                 if step["attempts"] >= settings.max_step_attempts:
                     step["status"] = "blocked"

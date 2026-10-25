@@ -38,7 +38,13 @@ def logout() -> None:
 
 
 def step_icon(status: str) -> str:
-    return {"done": "✅", "running": "🔄", "blocked": "🚧", "skipped": "⏭️"}.get(status, "⚪")
+    icons = {
+        "done": ":material/check_circle:",
+        "running": ":material/autorenew:",
+        "blocked": ":material/block:",
+        "skipped": ":material/skip_next:",
+    }
+    return icons.get(status, ":material/radio_button_unchecked:")
 
 
 def render_step_timeline(steps: list[dict], container) -> None:

@@ -15,7 +15,7 @@ def insights_page() -> None:
 
     runs = run_store().list_runs(user["id"], limit=500)
     if not runs:
-        st.info("📈 Insights appear once you have completed a few runs.")
+        st.info("Insights appear once you have completed a few runs.")
         return
 
     lifts = [(r["score_after"] or 0) - (r["score_before"] or 0) for r in runs]

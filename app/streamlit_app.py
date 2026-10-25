@@ -22,7 +22,7 @@ from app.views.run_detail import run_detail_page
 from app.views.workspace import workspace_page
 
 st.set_page_config(
-    page_title="Clean.ai", page_icon="🧼",
+    page_title="Clean.ai", page_icon=":material/water_drop:",
     layout="wide", initial_sidebar_state="expanded",
 )
 st.markdown(GLOBAL_CSS, unsafe_allow_html=True)
@@ -38,7 +38,7 @@ if current_user():
 
     with st.sidebar:
         st.markdown(
-            f"<h2 style='margin-bottom:0'>🧼 Clean<span style='color:{PRIMARY}'>.ai</span></h2>",
+            f"<h2 style='margin-bottom:0'>Clean<span style='color:{PRIMARY}'>.ai</span></h2>",
             unsafe_allow_html=True,
         )
         st.caption("agentic data cleaning")

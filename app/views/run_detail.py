@@ -34,11 +34,11 @@ def run_detail_page() -> None:
         st.warning(f"Stopped early: {run['error']}")
 
     plan_tab, ledger_tab, report_tab, logs_tab = st.tabs(
-        ["📋 Plan", "🧾 Actions", "🔍 Analysis", "🪵 Logs"])
+        [":material/checklist: Plan", ":material/receipt_long: Actions", ":material/search: Analysis", ":material/terminal: Logs"])
 
     with plan_tab:
         for step in run["steps"]:
-            icon = {"done": "✅", "blocked": "🚧", "skipped": "⏭️"}.get(step.get("status"), "⚪")
+            icon = {"done": ":material/check_circle:", "blocked": ":material/block:", "skipped": ":material/skip_next:"}.get(step.get("status"), ":material/radio_button_unchecked:")
             st.markdown(f"{icon} **{step['id']} · {step['tool']}** on {step.get('columns') or 'table'} "
                         f"— {step.get('rationale', '')}")
             if step.get("result"):
@@ -46,7 +46,7 @@ def run_detail_page() -> None:
 
     with ledger_tab:
         for record in run["ledger"]:
-            icon = {"ok": "✅", "error": "❌", "noop": "➖"}.get(record["status"], "•")
+            icon = {"ok": ":material/check_circle:", "error": ":material/error:", "noop": ":material/remove:"}.get(record["status"], ":material/circle:")
             st.markdown(f"{icon} **#{record['seq']} {record['tool']}** "
                         f"`{json.dumps(record.get('args', {}), default=str)[:100]}`")
             if record.get("delta"):
@@ -61,10 +61,10 @@ def run_detail_page() -> None:
     st.divider()
     d1, d2, d3 = st.columns(3)
     summary = {**run, "dataset_name": run["dataset_name"]}
-    d1.download_button("⬇️ Cleaned CSV", run.get("cleaned_csv") or "",
+    d1.download_button("Cleaned CSV", run.get("cleaned_csv") or "", icon=":material/download:",
                        file_name=f"cleaned_{run['dataset_name']}", type="primary",
                        use_container_width=True)
-    d2.download_button("🧾 Recipe script", build_recipe_script(summary),
+    d2.download_button("Recipe script", build_recipe_script(summary), icon=":material/code:",
                        file_name="clean_recipe.py", use_container_width=True)
-    d3.download_button("📝 Run report", build_run_report(summary),
+    d3.download_button("Run report", build_run_report(summary), icon=":material/description:",
                        file_name="run_report.md", use_container_width=True)

@@ -10,7 +10,7 @@ def history_page() -> None:
 
     runs = run_store().list_runs(user["id"])
     if not runs:
-        st.info("🗂️ No runs yet — clean your first dataset from the Workspace.")
+        st.info("No runs yet — clean your first dataset from the Workspace.")
         if st.button("Go to Workspace", type="primary"):
             st.session_state.nav_hint = "workspace"
             st.rerun()
@@ -29,7 +29,7 @@ def history_page() -> None:
         "ID": r["id"],
         "Dataset": r["dataset_name"],
         "When": r["created_at"][:16].replace("T", " "),
-        "Status": {"clean": "✅ clean", "partial": "⚠️ partial"}.get(r["status"], f"🛑 {r['status']}"),
+        "Status": r["status"],
         "Rows in→out": f"{r['rows_before']}→{r['rows_after']}",
         "Quality before": r["score_before"],
         "Quality after": r["score_after"],

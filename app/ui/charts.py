@@ -17,8 +17,9 @@ LAYOUT_DEFAULTS = dict(
     plot_bgcolor=SURFACE,
     paper_bgcolor=SURFACE,
     font=dict(color=TEXT, size=13),
-    margin=dict(l=10, r=10, t=44, b=10),
-    legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0),
+    margin=dict(l=10, r=10, t=76, b=10),
+    legend=dict(orientation="h", yanchor="bottom", y=1.0, x=0, bgcolor="rgba(0,0,0,0)"),
+    title=dict(yanchor="top", y=0.97),
     hovermode="closest",
 )
 

@@ -127,8 +127,7 @@ def _render_review() -> None:
     issue_rows = []
     for card in cards:
         for issue in card.issues_open:
-            severity_dot = {"high": "🔴", "medium": "🟠", "low": "🟡"}.get(issue.severity, "⚪")
-            issue_rows.append({"Severity": f"{severity_dot} {issue.severity}",
+            issue_rows.append({"Severity": issue.severity.upper(),
                                "Column": issue.column or "(table)",
                                "Issue": issue.kind.replace("_", " "),
                                "Evidence": issue.evidence})
@@ -139,7 +138,7 @@ def _render_review() -> None:
     with st.expander("Full analysis report"):
         st.markdown(values.get("analysis_report", ""))
     if values.get("case_hints"):
-        st.info(f"🧠 Memory from similar past runs:\n\n{values['case_hints']}")
+        st.info(f"Memory from similar past runs:\n\n{values['case_hints']}")
 
     st.subheader("4 · Review the plan")
     st.caption("Edit any cell, untick steps you don't want, or just tell the agent what to change.")
@@ -170,7 +169,7 @@ def _render_review() -> None:
             impacts = simulate_plan(st.session_state.df, plan)
             st.session_state.plan_impacts = impacts
         for impact in impacts:
-            icon = "✅" if impact["ok"] else "⚠️"
+            icon = ":material/check_circle:" if impact["ok"] else ":material/warning:"
             st.markdown(f"{icon} **{impact['id']} {impact['tool']}** → {impact['effect']}")
 
     chat_instruction = st.chat_input("Tell the agent how to change the plan (e.g. 'don't drop any rows')")
@@ -179,7 +178,7 @@ def _render_review() -> None:
             revised = revise_plan_with_chat(plan, chat_instruction, st.session_state.df)
         session.update_plan(revised)
         st.session_state.pop("plan_impacts", None)
-        st.toast("Plan revised", icon="✏️")
+        st.toast("Plan revised", icon=":material/edit:")
         st.rerun()
 
     run_col, discard_col = st.columns([1, 1])
@@ -236,7 +235,7 @@ def _render_results(user: dict) -> None:
     status_banner = {
         "clean": ("All validation checks passed.", st.success),
         "partial": ("Finished with some remaining issues — see below.", st.warning),
-        "stopped": (f"Stopped early: {summary['error']}", st.warning),
+        "stopped": (summary["error"].replace("stopped:", "Stopped early:", 1), st.warning),
     }
     text, renderer = status_banner.get(summary["status"], ("Run finished.", st.info))
     renderer(text)
@@ -255,7 +254,7 @@ def _render_results(user: dict) -> None:
     df_before = session.app.get_state(session.config).values["original_df"]
     df_after = session.state_values()["current_df"]
 
-    chart_tab, diff_tab, ledger_tab = st.tabs(["📊 Charts", "🔍 Before / after", "🧾 Action ledger"])
+    chart_tab, diff_tab, ledger_tab = st.tabs([":material/bar_chart: Charts", ":material/compare: Before / after", ":material/receipt_long: Action ledger"])
 
     with chart_tab:
         c1, c2 = st.columns(2)
@@ -282,7 +281,7 @@ def _render_results(user: dict) -> None:
 
     with ledger_tab:
         for record in summary["ledger"]:
-            icon = {"ok": "✅", "error": "❌", "noop": "➖"}.get(record["status"], "•")
+            icon = {"ok": ":material/check_circle:", "error": ":material/error:", "noop": ":material/remove:"}.get(record["status"], ":material/circle:")
             st.markdown(f"{icon} **#{record['seq']} {record['tool']}** "
                         f"`{json.dumps(record['args'], default=str)[:100]}`")
             if record.get("delta"):
@@ -292,14 +291,14 @@ def _render_results(user: dict) -> None:
 
     st.subheader("6 · Take it with you")
     d1, d2, d3, d4 = st.columns(4)
-    d1.download_button("⬇️ Cleaned CSV", summary["cleaned_csv"],
+    d1.download_button("Cleaned CSV", summary["cleaned_csv"], icon=":material/download:",
                        file_name=f"cleaned_{summary['dataset_name']}", type="primary",
                        use_container_width=True)
-    d2.download_button("🧾 Recipe script (.py)", build_recipe_script(summary),
+    d2.download_button("Recipe script (.py)", build_recipe_script(summary), icon=":material/code:",
                        file_name="clean_recipe.py", use_container_width=True)
-    d3.download_button("📋 Plan (.json)", build_plan_json(summary),
+    d3.download_button("Plan (.json)", build_plan_json(summary), icon=":material/data_object:",
                        file_name="cleaning_plan.json", use_container_width=True)
-    d4.download_button("📝 Run report (.md)", build_run_report(summary),
+    d4.download_button("Run report (.md)", build_run_report(summary), icon=":material/description:",
                        file_name="run_report.md", use_container_width=True)
 
     if "saved_run_id" not in st.session_state:
@@ -308,7 +307,7 @@ def _render_results(user: dict) -> None:
             session.learn_from_run()
         except Exception:
             pass
-        st.toast("Run saved to history", icon="💾")
+        st.toast("Run saved to history", icon=":material/save:")
 
     if st.button("Start a new run"):
         reset_workspace()

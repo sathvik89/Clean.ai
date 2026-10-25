@@ -9,16 +9,16 @@ def login_page() -> None:
     left, right = st.columns([1.2, 1], gap="large")
 
     with left:
-        st.markdown(f"<h1 style='font-size:2.6rem'>🧼 Clean<span style='color:{PRIMARY}'>.ai</span></h1>",
+        st.markdown(f"<h1 style='font-size:2.6rem'>Clean<span style='color:{PRIMARY}'>.ai</span></h1>",
                     unsafe_allow_html=True)
         st.markdown(
             "#### An agent that cleans your messy data — and shows its work.\n\n"
             "Upload a messy CSV, tell it what the data is for, and Clean.ai will:\n"
-            "- 🔍 **Profile** every column and find the real problems (even `'N/A'` hiding as text)\n"
-            "- 📋 **Propose a plan** you can inspect, edit, or rewrite in plain English\n"
-            "- 🛡️ **Execute safely** — sandboxed code, row-deletion guardrails, full action ledger\n"
-            "- 📈 **Prove it worked** with before/after quality scores and charts\n"
-            "- 🧾 **Hand you a recipe** — a standalone python script that re-runs the cleaning anywhere\n"
+            "- :material/search: **Profile** every column and find the real problems (even `'N/A'` hiding as text)\n"
+            "- :material/checklist: **Propose a plan** you can inspect, edit, or rewrite in plain English\n"
+            "- :material/shield: **Execute safely** — sandboxed code, row-deletion guardrails, full action ledger\n"
+            "- :material/monitoring: **Prove it worked** with before/after quality scores and charts\n"
+            "- :material/description: **Hand you a recipe** — a standalone python script that re-runs the cleaning anywhere\n"
         )
         st.markdown(
             f"<span style='color:{TEXT_MUTED}'>It remembers what worked: every finished run teaches "
@@ -50,7 +50,7 @@ def login_page() -> None:
                     try:
                         user = user_store().register(email, password, name)
                         st.session_state.user = user
-                        st.toast("Account created — welcome!", icon="🎉")
+                        st.toast("Account created — welcome!", icon=":material/verified:")
                         st.rerun()
                     except AuthError as exc:
                         st.error(str(exc))
