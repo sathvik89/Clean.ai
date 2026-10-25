@@ -74,3 +74,28 @@ def test_run_report_contains_metrics(summary):
     report = build_run_report(summary)
     assert "quality score | 55 | 97" in report
     assert "remove_duplicates" in report
+
+
+def test_apply_recorded_actions_replays_deterministically(messy_df):
+    from cleanai.services.pipeline import apply_recorded_actions
+
+    actions = [
+        {"seq": 1, "tool": "remove_duplicates", "args": {}, "status": "ok", "delta": "rows 5->4"},
+        {"seq": 2, "tool": "handle_missing", "args": {"strategy": "median", "columns": ["age"]},
+         "status": "ok", "delta": "nulls.age 1->0"},
+        {"seq": 3, "tool": "get_summary", "args": {}, "status": "ok", "delta": ""},
+    ]
+    replay = apply_recorded_actions(messy_df, actions)
+    assert len(replay["df"]) == 4
+    assert replay["df"]["age"].isnull().sum() == 0
+    assert replay["score_after"] >= replay["score_before"]
+    assert len(replay["log"]) == 2
+
+
+def test_tool_usage_counts_effective_calls(tmp_path, summary):
+    from cleanai.services.persistence import RunStore
+
+    store = RunStore(tmp_path / "runs.sqlite3")
+    store.save_run(user_id=1, payload=summary)
+    usage = store.tool_usage(user_id=1)
+    assert usage == {"remove_duplicates": 1}

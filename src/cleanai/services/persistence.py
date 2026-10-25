@@ -97,6 +97,19 @@ class RunStore:
             results.append(entry)
         return results
 
+    def tool_usage(self, user_id: int) -> Dict[str, int]:
+        """How often each tool actually changed data, across all runs."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT ledger_json FROM runs WHERE user_id = ?", (user_id,)
+            ).fetchall()
+        counts: Dict[str, int] = {}
+        for row in rows:
+            for record in json.loads(row["ledger_json"] or "[]"):
+                if record.get("status") == "ok" and record.get("delta"):
+                    counts[record["tool"]] = counts.get(record["tool"], 0) + 1
+        return dict(sorted(counts.items(), key=lambda kv: kv[1]))
+
     def get_run(self, run_id: int, user_id: int) -> Optional[Dict[str, Any]]:
         with self._connect() as conn:
             row = conn.execute(

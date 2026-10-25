@@ -62,6 +62,39 @@ def simulate_plan(df: pd.DataFrame, steps: List[Dict[str, Any]]) -> List[Dict[st
     return impacts
 
 
+def apply_recorded_actions(df: pd.DataFrame, actions: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Deterministically replay a past run's effective actions on a new file.
+
+    No LLM involved: each recorded ok-action goes back through the tool
+    registry. Returns the new frame plus a line-by-line replay log.
+    """
+    from cleanai.agents.tools import registry
+
+    working = df.copy()
+    log: List[str] = []
+    for record in actions:
+        if record.get("status") != "ok":
+            continue
+        name = record["tool"]
+        spec = registry.REGISTRY.get(name)
+        if spec is None or not spec.mutates:
+            continue
+        before = profiling.snapshot(working)
+        result = registry.execute(name, working, record.get("args") or {})
+        if result.status == "ok" and result.mutated:
+            delta = profiling.metrics_delta(before, profiling.snapshot(result.df))
+            working = result.df
+            log.append(f"{name}: {profiling.render_delta(delta)}")
+        else:
+            log.append(f"{name}: skipped ({result.message[:90]})")
+    return {
+        "df": working,
+        "log": log,
+        "score_before": profiling.quality_score(df),
+        "score_after": profiling.quality_score(working),
+    }
+
+
 def revise_plan_with_chat(
     steps: List[Dict[str, Any]],
     instruction: str,

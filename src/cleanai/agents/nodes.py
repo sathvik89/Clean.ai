@@ -255,13 +255,17 @@ def tool_handler_node(state: AgentState) -> Dict[str, Any]:
         delta_text = ""
         if result.mutated:
             after = profiling.snapshot(result.df)
-            rows_dropped = before["rows"] - after["rows"]
-            drop_pct = 100.0 * rows_dropped / max(before["rows"], 1)
-            if drop_pct > settings.max_row_drop_pct:
+            # the row budget is cumulative for the whole run, so many small
+            # drops cannot quietly delete half the dataset
+            original_rows = len(state["original_df"])
+            min_allowed_rows = original_rows * (1 - settings.max_row_drop_pct / 100.0)
+            if after["rows"] < min_allowed_rows:
+                total_dropped = original_rows - after["rows"]
                 result = registry.ToolResult(
                     message=(
-                        f"guardrail: refused - this call would delete {rows_dropped} rows "
-                        f"({drop_pct:.0f}%), above the {settings.max_row_drop_pct:.0f}% safety cap. "
+                        f"guardrail: refused - this call would bring the run's total deleted rows to "
+                        f"{total_dropped} of {original_rows} ({100.0 * total_dropped / max(original_rows, 1):.0f}%), "
+                        f"above the {settings.max_row_drop_pct:.0f}% budget for the whole run. "
                         "Repair values instead of dropping rows."
                     ),
                     status="error",
