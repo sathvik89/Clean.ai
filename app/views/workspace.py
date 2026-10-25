@@ -11,7 +11,7 @@ import streamlit as st
 
 from app.ui import charts
 from app.ui.components import render_step_timeline, require_user, reset_workspace, run_store
-from app.ui.theme import stage_chips
+from app.ui.theme import hero, section, stepper
 from cleanai.core import profiling
 from cleanai.services.pipeline import CleaningSession, revise_plan_with_chat, simulate_plan
 from cleanai.services.recipe import build_plan_json, build_recipe_script
@@ -38,7 +38,7 @@ def _set_stage(value: int) -> None:
 
 def workspace_page() -> None:
     user = require_user()
-    st.markdown(stage_chips(_stage()), unsafe_allow_html=True)
+    st.markdown(stepper(_stage()), unsafe_allow_html=True)
 
     _render_upload()
     if "df" not in st.session_state:
@@ -62,7 +62,7 @@ def _load_dataframe(df: pd.DataFrame, name: str) -> None:
 
 
 def _render_upload() -> None:
-    st.subheader("1 · Upload your data")
+    st.markdown(section(1, "Upload your data", "CSV in, clean data out. Start with a file or one of the messy samples."), unsafe_allow_html=True)
     upload_col, sample_col = st.columns([2.2, 1], gap="large")
 
     with upload_col:
@@ -93,7 +93,7 @@ def _render_upload() -> None:
 
 
 def _render_context() -> None:
-    st.subheader("2 · What is this data for?")
+    st.markdown(section(2, "What is this data for?", "The agent plans differently for ML, reporting, or audits."), unsafe_allow_html=True)
     preset = st.pills("Intended use", CONTEXT_PRESETS, key="context_preset")
     detail = st.text_input("Anything specific? (optional)",
                            placeholder="e.g. keep every row, salary must stay in rupees")
@@ -122,7 +122,7 @@ def _render_review() -> None:
     session: CleaningSession = st.session_state.cleaning_session
     values = session.state_values()
 
-    st.subheader("3 · What the agent found")
+    st.markdown(section(3, "What the agent found"), unsafe_allow_html=True)
     cards = values.get("cards", [])
     issue_rows = []
     for card in cards:
@@ -140,8 +140,7 @@ def _render_review() -> None:
     if values.get("case_hints"):
         st.info(f"Memory from similar past runs:\n\n{values['case_hints']}")
 
-    st.subheader("4 · Review the plan")
-    st.caption("Edit any cell, untick steps you don't want, or just tell the agent what to change.")
+    st.markdown(section(4, "Review the plan", "Edit any cell, untick steps you don't want, or tell the agent what to change in plain English."), unsafe_allow_html=True)
 
     plan = session.get_plan()
     editor_rows = [{
@@ -231,30 +230,37 @@ def _render_results(user: dict) -> None:
     summary = st.session_state.summary
     session: CleaningSession = st.session_state.cleaning_session
 
-    st.subheader("5 · Results")
-    status_banner = {
-        "clean": ("All validation checks passed.", st.success),
-        "partial": ("Finished with some remaining issues — see below.", st.warning),
-        "stopped": (summary["error"].replace("stopped:", "Stopped early:", 1), st.warning),
-    }
-    text, renderer = status_banner.get(summary["status"], ("Run finished.", st.info))
-    renderer(text)
+    st.markdown(section(5, "Results"), unsafe_allow_html=True)
 
     lift = summary["score_after"] - summary["score_before"]
+    notes = {
+        "clean": "Every validation check passed. The dataset is ready for its job.",
+        "partial": "The run finished with some remaining issues — the ledger below shows exactly what is left.",
+        "stopped": summary["error"].replace("stopped:", "", 1).strip().capitalize() or "The run was stopped early.",
+    }
+    st.markdown(hero(
+        summary["score_after"], lift, summary["status"],
+        notes.get(summary["status"], "Run finished."),
+    ), unsafe_allow_html=True)
+
     m1, m2, m3, m4 = st.columns(4)
-    m1.metric("Quality score", summary["score_after"], delta=f"{lift:+d}")
-    m2.metric("Missing cells", summary["nulls_after"],
+    m1.metric("Missing cells", summary["nulls_after"],
               delta=summary["nulls_after"] - summary["nulls_before"], delta_color="inverse")
-    m3.metric("Duplicate rows", summary["duplicates_after"],
+    m2.metric("Duplicate rows", summary["duplicates_after"],
               delta=summary["duplicates_after"] - summary["duplicates_before"], delta_color="inverse")
-    m4.metric("Rows kept", f"{summary['rows_after']:,}",
+    m3.metric("Rows kept", f"{summary['rows_after']:,}",
               delta=summary["rows_after"] - summary["rows_before"])
-    st.caption(f"LLM tokens used this run: {summary['tokens_used']:,}")
+    m4.metric("LLM tokens", f"{summary['tokens_used']:,}")
 
     df_before = session.app.get_state(session.config).values["original_df"]
     df_after = session.state_values()["current_df"]
 
-    chart_tab, diff_tab, ledger_tab = st.tabs([":material/bar_chart: Charts", ":material/compare: Before / after", ":material/receipt_long: Action ledger"])
+    chart_tab, scorecard_tab, diff_tab, ledger_tab = st.tabs([
+        ":material/bar_chart: Charts",
+        ":material/fact_check: Column scorecard",
+        ":material/compare: Before / after",
+        ":material/receipt_long: Action ledger",
+    ])
 
     with chart_tab:
         c1, c2 = st.columns(2)
@@ -272,12 +278,47 @@ def _render_results(user: dict) -> None:
         ), use_container_width=True)
         c4.plotly_chart(charts.dtype_composition(df_before, df_after), use_container_width=True)
 
+    with scorecard_tab:
+        st.caption("Per-column health after the run. Every open issue and applied fix, column by column.")
+        cards_after = session.state_values().get("cards", [])
+        nulls_before = df_before.isnull().sum()
+        rows = []
+        for card in cards_after:
+            before_nulls = int(nulls_before.get(card.name, 0))
+            rows.append({
+                "Column": card.name,
+                "Role": card.role,
+                "Status": card.status,
+                "Nulls before": before_nulls,
+                "Nulls after": card.null_count,
+                "Open issues": "; ".join(i.kind.replace("_", " ") for i in card.issues_open) or "—",
+                "Fixes applied": ", ".join(card.fixes_applied[-4:]) or "—",
+            })
+        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
     with diff_tab:
+        st.caption("First 40 rows side by side. Changed cells in the after view are highlighted.")
         left, right = st.columns(2)
-        left.caption("Before")
-        left.dataframe(df_before.head(40), use_container_width=True)
-        right.caption("After")
-        right.dataframe(df_after.head(40), use_container_width=True)
+        sample_before = df_before.head(40).reset_index(drop=True)
+        sample_after = df_after.head(40).reset_index(drop=True)
+        left.markdown("**Before**")
+        left.dataframe(sample_before, use_container_width=True)
+        right.markdown("**After**")
+        shared_cols = [c for c in sample_after.columns if c in sample_before.columns]
+        overlap = min(len(sample_before), len(sample_after))
+        if shared_cols and overlap > 0:
+            before_text = sample_before.loc[:overlap - 1, shared_cols].astype(str)
+
+            def _highlight(frame: pd.DataFrame) -> pd.DataFrame:
+                styles = pd.DataFrame("", index=frame.index, columns=frame.columns)
+                for col in shared_cols:
+                    changed = frame[col].astype(str).iloc[:overlap].ne(before_text[col])
+                    styles.loc[changed[changed].index, col] = "background-color: #E5E4FB"
+                return styles
+
+            right.dataframe(sample_after.style.apply(_highlight, axis=None), use_container_width=True)
+        else:
+            right.dataframe(sample_after, use_container_width=True)
 
     with ledger_tab:
         for record in summary["ledger"]:
@@ -289,7 +330,7 @@ def _render_results(user: dict) -> None:
             if record.get("error"):
                 st.caption(f"error: {record['error']}")
 
-    st.subheader("6 · Take it with you")
+    st.markdown(section(6, "Take it with you", "Everything is reusable: the data, the report, and a script that re-runs this cleaning anywhere."), unsafe_allow_html=True)
     d1, d2, d3, d4 = st.columns(4)
     d1.download_button("Cleaned CSV", summary["cleaned_csv"], icon=":material/download:",
                        file_name=f"cleaned_{summary['dataset_name']}", type="primary",

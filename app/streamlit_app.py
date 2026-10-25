@@ -14,7 +14,7 @@ for extra in (ROOT, ROOT / "src"):
 import streamlit as st
 
 from app.ui.components import current_user, logout
-from app.ui.theme import GLOBAL_CSS, PRIMARY
+from app.ui.theme import GLOBAL_CSS, brand_html
 from app.views.history import history_page
 from app.views.insights import insights_page
 from app.views.login import login_page
@@ -37,10 +37,7 @@ if current_user():
     navigation = st.navigation({"Clean": [workspace, run_detail], "Review": [history, insights]})
 
     with st.sidebar:
-        st.markdown(
-            f"<h2 style='margin-bottom:0'>Clean<span style='color:{PRIMARY}'>.ai</span></h2>",
-            unsafe_allow_html=True,
-        )
+        st.markdown(brand_html("1.55rem", light=True), unsafe_allow_html=True)
         st.caption("agentic data cleaning")
         st.divider()
         user = current_user()

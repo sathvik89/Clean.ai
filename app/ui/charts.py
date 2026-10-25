@@ -1,7 +1,7 @@
 """Plotly chart builders for before/after data quality.
 
-Every chart keeps one axis, a white surface, recessive gridlines, and the
-fixed entity colors: before = neutral gray, after = indigo.
+One axis per chart, white surface, recessive grid, rounded bars, and the
+fixed entity colors: before is always neutral gray, after always indigo.
 """
 
 from __future__ import annotations
@@ -11,18 +11,38 @@ from typing import Dict, List
 import pandas as pd
 import plotly.graph_objects as go
 
-from app.ui.theme import ACCENT, AFTER_COLOR, BEFORE_COLOR, BORDER, PRIMARY, SURFACE, TEXT, TEXT_MUTED
+from app.ui.theme import (
+    ACCENT, AFTER_COLOR, BEFORE_COLOR, BORDER, CATEGORICAL,
+    PRIMARY, SURFACE, TEXT, TEXT_MUTED, VIOLET,
+)
+
+FONT_STACK = "'Inter', -apple-system, 'Segoe UI', Roboto, sans-serif"
 
 LAYOUT_DEFAULTS = dict(
     plot_bgcolor=SURFACE,
     paper_bgcolor=SURFACE,
-    font=dict(color=TEXT, size=13),
-    margin=dict(l=10, r=10, t=76, b=10),
-    legend=dict(orientation="h", yanchor="bottom", y=1.0, x=0, bgcolor="rgba(0,0,0,0)"),
+    font=dict(color=TEXT, size=13, family=FONT_STACK),
+    title_font=dict(size=15.5, color=TEXT, family=FONT_STACK),
+    margin=dict(l=10, r=14, t=78, b=12),
+    legend=dict(
+        orientation="h", yanchor="bottom", y=1.0, x=0,
+        bgcolor="rgba(0,0,0,0)", font=dict(size=12, color=TEXT_MUTED),
+    ),
     hovermode="closest",
+    hoverlabel=dict(
+        bgcolor="#FFFFFF", bordercolor=BORDER,
+        font=dict(family=FONT_STACK, size=12.5, color=TEXT),
+    ),
+    barcornerradius=5,
 )
 
-GRID = dict(gridcolor=BORDER, zerolinecolor=BORDER)
+GRID = dict(
+    gridcolor="#EEF1F8",
+    zeroline=False,
+    linecolor="rgba(0,0,0,0)",
+    tickfont=dict(size=11.5, color=TEXT_MUTED),
+    title_font=dict(size=12, color=TEXT_MUTED),
+)
 
 
 def nulls_before_after(df_before: pd.DataFrame, df_after: pd.DataFrame) -> go.Figure:
@@ -38,11 +58,14 @@ def nulls_before_after(df_before: pd.DataFrame, df_after: pd.DataFrame) -> go.Fi
 
     fig = go.Figure()
     fig.add_bar(y=names, x=[r[1] for r in rows], name="Before", orientation="h",
-                marker=dict(color=BEFORE_COLOR), hovertemplate="%{y}: %{x} nulls before<extra></extra>")
+                marker=dict(color=BEFORE_COLOR),
+                hovertemplate="%{y}: %{x} nulls before<extra></extra>")
     fig.add_bar(y=names, x=[r[2] for r in rows], name="After", orientation="h",
-                marker=dict(color=AFTER_COLOR), hovertemplate="%{y}: %{x} nulls after<extra></extra>")
+                marker=dict(color=AFTER_COLOR),
+                text=[r[2] if r[2] else "" for r in rows], textposition="outside",
+                hovertemplate="%{y}: %{x} nulls after<extra></extra>")
     fig.update_layout(title="Missing values per column", barmode="group",
-                      bargap=0.3, **LAYOUT_DEFAULTS)
+                      bargap=0.32, bargroupgap=0.12, **LAYOUT_DEFAULTS)
     fig.update_xaxes(title="null count", **GRID)
     fig.update_yaxes(**GRID)
     return fig
@@ -52,14 +75,16 @@ def quality_dimensions(before: Dict[str, int], after: Dict[str, int]) -> go.Figu
     labels = [k.capitalize() for k in before]
     fig = go.Figure()
     fig.add_bar(x=labels, y=list(before.values()), name="Before",
-                marker=dict(color=BEFORE_COLOR), hovertemplate="%{x}: %{y}/100 before<extra></extra>")
+                marker=dict(color=BEFORE_COLOR),
+                hovertemplate="%{x}: %{y}/100 before<extra></extra>")
     fig.add_bar(x=labels, y=list(after.values()), name="After",
                 marker=dict(color=AFTER_COLOR),
                 text=list(after.values()), textposition="outside",
+                textfont=dict(size=12.5, color=PRIMARY),
                 hovertemplate="%{x}: %{y}/100 after<extra></extra>")
     fig.update_layout(title="Quality dimensions (0-100)", barmode="group",
-                      bargap=0.35, **LAYOUT_DEFAULTS)
-    fig.update_yaxes(range=[0, 112], **GRID)
+                      bargap=0.38, bargroupgap=0.14, **LAYOUT_DEFAULTS)
+    fig.update_yaxes(range=[0, 114], **GRID)
     fig.update_xaxes(**GRID)
     return fig
 
@@ -87,9 +112,12 @@ def row_waterfall(rows_before: int, ledger: List[dict], rows_after: int) -> go.F
         x=labels, y=values, measure=measures,
         decreasing=dict(marker=dict(color=ACCENT)),
         increasing=dict(marker=dict(color=PRIMARY)),
-        totals=dict(marker=dict(color=PRIMARY)),
-        connector=dict(line=dict(color=BORDER)),
-        hovertemplate="%{x}: %{y}<extra></extra>",
+        totals=dict(marker=dict(color=VIOLET)),
+        connector=dict(line=dict(color=BORDER, width=1.5)),
+        text=[f"{v:+,}" if m == "relative" else f"{v:,}" for v, m in zip(values, measures)],
+        textposition="outside",
+        textfont=dict(size=12, color=TEXT_MUTED),
+        hovertemplate="%{x}: %{y:,}<extra></extra>",
     ))
     fig.update_layout(title="Row count through the run", showlegend=False, **LAYOUT_DEFAULTS)
     fig.update_yaxes(**GRID)
@@ -112,19 +140,22 @@ def dtype_composition(df_before: pd.DataFrame, df_after: pd.DataFrame) -> go.Fig
 
     before_counts, after_counts = counts(df_before), counts(df_after)
     kinds = sorted(set(before_counts) | set(after_counts))
-    from app.ui.theme import CATEGORICAL
     palette = {kind: CATEGORICAL[i % len(CATEGORICAL)] for i, kind in enumerate(kinds)}
 
     fig = go.Figure()
     for kind in kinds:
+        values = [after_counts.get(kind, 0), before_counts.get(kind, 0)]
         fig.add_bar(
-            y=["After", "Before"],
-            x=[after_counts.get(kind, 0), before_counts.get(kind, 0)],
+            y=["After", "Before"], x=values,
             name=kind, orientation="h",
             marker=dict(color=palette[kind], line=dict(color=SURFACE, width=2)),
+            text=[v if v else "" for v in values],
+            textposition="inside", insidetextanchor="middle",
+            textfont=dict(size=12, color="#FFFFFF"),
             hovertemplate=f"{kind}: %{{x}} columns<extra></extra>",
         )
-    fig.update_layout(title="Column types, before vs after", barmode="stack", **LAYOUT_DEFAULTS)
+    fig.update_layout(title="Column types, before vs after", barmode="stack",
+                      bargap=0.45, **LAYOUT_DEFAULTS)
     fig.update_xaxes(title="columns", **GRID)
-    fig.update_yaxes(**GRID)
+    fig.update_yaxes(tickfont=dict(size=12.5, color=TEXT), gridcolor="rgba(0,0,0,0)", zeroline=False)
     return fig

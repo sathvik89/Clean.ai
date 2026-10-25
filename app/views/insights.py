@@ -37,6 +37,18 @@ def insights_page() -> None:
     fig.update_yaxes(**GRID)
     st.plotly_chart(fig, use_container_width=True)
 
+    usage = run_store().tool_usage(user["id"])
+    if usage:
+        fig_tools = go.Figure(go.Bar(
+            y=[t.replace("_", " ") for t in usage.keys()], x=list(usage.values()),
+            orientation="h", marker=dict(color=PRIMARY),
+            hovertemplate="%{y}: %{x} effective uses<extra></extra>",
+        ))
+        fig_tools.update_layout(title="Which tools actually fix your data", showlegend=False, **LAYOUT_DEFAULTS)
+        fig_tools.update_xaxes(title="times a call changed the data", **GRID)
+        fig_tools.update_yaxes(**GRID)
+        st.plotly_chart(fig_tools, use_container_width=True)
+
     scores = frame.dropna(subset=["score_before", "score_after"])
     fig2 = go.Figure()
     fig2.add_scatter(x=list(range(1, len(scores) + 1)), y=scores["score_before"][::-1],

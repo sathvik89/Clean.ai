@@ -59,6 +59,33 @@ def run_detail_page() -> None:
         st.code(run.get("logs_text") or "no logs", language=None)
 
     st.divider()
+    st.markdown("#### Re-apply this recipe to a new file")
+    st.caption("Replays this run's effective actions on a fresh CSV — deterministic, no LLM, no waiting.")
+    new_file = st.file_uploader("New CSV", type=["csv"], key=f"replay_{run['id']}",
+                                label_visibility="collapsed")
+    if new_file is not None:
+        import pandas as pd
+
+        from cleanai.services.pipeline import apply_recorded_actions
+
+        try:
+            new_df = pd.read_csv(new_file)
+            replay = apply_recorded_actions(new_df, run["ledger"])
+        except Exception as exc:
+            st.error(f"Could not apply the recipe: {exc}")
+        else:
+            r1, r2, r3 = st.columns([1, 1, 2])
+            r1.metric("Quality", replay["score_after"],
+                      delta=replay["score_after"] - replay["score_before"])
+            r2.metric("Rows", len(replay["df"]), delta=len(replay["df"]) - len(new_df))
+            r3.download_button("Download cleaned file", replay["df"].to_csv(index=False),
+                               file_name=f"cleaned_{new_file.name}", type="primary",
+                               icon=":material/download:", use_container_width=True)
+            with st.expander("Replay log"):
+                for line in replay["log"]:
+                    st.markdown(f"- {line}")
+
+    st.divider()
     d1, d2, d3 = st.columns(3)
     summary = {**run, "dataset_name": run["dataset_name"]}
     d1.download_button("Cleaned CSV", run.get("cleaned_csv") or "", icon=":material/download:",
