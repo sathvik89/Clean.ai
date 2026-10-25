@@ -39,7 +39,8 @@ class ActionRecord:
             args_txt = args_txt[:110] + "...}"
         line = f"#{self.seq} {self.tool}({args_txt}) -> {self.status}"
         if self.status == "error":
-            return f"{line}: {self.error.splitlines()[0][:120]}"
+            first_line = self.error.splitlines()[0][:120] if self.error else "unknown error"
+            return f"{line}: {first_line}"
         if self.delta:
             return f"{line} | {self.delta}"
         return line
