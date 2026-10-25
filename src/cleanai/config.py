@@ -28,7 +28,7 @@ class Settings(BaseSettings):
 
     # agent loop guardrails
     max_tool_rounds: int = 20
-    max_validation_rounds: int = 5
+    max_validation_rounds: int = 8
     max_step_attempts: int = 3
     max_stagnation_rounds: int = 2
 

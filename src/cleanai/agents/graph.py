@@ -47,7 +47,10 @@ def route_after_tools(state: AgentState) -> str:
     settings = get_settings()
     if state["tool_rounds"] >= settings.max_tool_rounds:
         return "validator"
-    if state["mode"] == "plan" and state["current_step_index"] >= len(state["plan_steps"]):
+    if state["mode"] == "repair":
+        # re-check after every repair round so the run ends as soon as it's clean
+        return "validator"
+    if state["current_step_index"] >= len(state["plan_steps"]):
         return "validator"
     return "executor"
 
