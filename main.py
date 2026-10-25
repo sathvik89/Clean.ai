@@ -1,122 +1,68 @@
-import pandas as pd
-import os
+"""Clean.ai command line runner.
+
+Usage: python main.py path/to/data.csv --goal "ML modeling"
+"""
+
+import argparse
 import sys
-from graph import app
-from dotenv import load_dotenv
+from pathlib import Path
 
-load_dotenv()
+import pandas as pd
 
-def main():
-    print("=== Agentic AI Data Cleaning Tool ===")
-    
-    # 1. file upload (path input)
-    file_path = input("enter the path to your raw CSV file (default: dirty_data.csv): ").strip() or "dirty_data.csv"
-    if not os.path.exists(file_path):
-        print(f"error: file not found at {file_path}")
-        return
+sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
 
-    # 2. user context
-    user_context = input("what is this data for? (e.g., ML modeling, business reporting, auditing): ").strip()
-    if not user_context:
-        user_context = "general cleaning and formatting"
+from cleanai.services.pipeline import CleaningSession, simulate_plan
+from cleanai.services.recipe import build_recipe_script
+from cleanai.services.reporting import build_run_report
 
-    # load initial data
-    try:
-        df = pd.read_csv(file_path)
-    except Exception as e:
-        print(f"error reading csv: {e}")
-        return
 
-    # initialize state
-    config = {"configurable": {"thread_id": "cleaning_session_1"}}
-    initial_state = {
-        "file_path": file_path,
-        "current_df": df,
-        "df_history": [df],
-        "user_context": user_context,
-        "analysis_report": "",
-        "cleaning_plan": "",
-        "audit_report": {},
-        "validation_profile": {},
-        "work_summary": "",
-        "validation_feedback": "",
-        "run_error": "",
-        "logs": [],
-        "is_clean": False,
-        "tool_rounds": 0,
-        "max_tool_rounds": 12,
-        "validation_rounds": 0,
-        "max_validation_rounds": 6,
-        "validation_signature": "",
-        "stagnation_rounds": 0,
-        "max_stagnation_rounds": 2,
-        "messages": []
-    }
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Clean a messy CSV with the Clean.ai agent")
+    parser.add_argument("csv_path", help="path to the input CSV")
+    parser.add_argument("--goal", default="general cleaning and formatting",
+                        help="what the data will be used for")
+    parser.add_argument("--yes", action="store_true", help="auto-approve the plan")
+    parser.add_argument("--out", default="cleaned_data.csv", help="output CSV path")
+    args = parser.parse_args()
 
-    print("\n--- starting agentic analysis ---")
-    
-    # run until human review
-    for event in app.stream(initial_state, config):
-        for node_name, output in event.items():
-            print(f"\n[node: {node_name}]")
-            if "logs" in output:
-                for log in output["logs"]:
-                    print(f"  - {log}")
-            
-            if node_name == "analyzer":
-                print(f"\nanalysis report:\n{output['analysis_report']}")
-            
-            if node_name == "planner":
-                print(f"\nproposed cleaning plan:\n{output['cleaning_plan']}")
+    path = Path(args.csv_path)
+    if not path.exists():
+        print(f"error: file not found: {path}")
+        return 1
+    df = pd.read_csv(path)
+    print(f"loaded {len(df)} rows x {len(df.columns)} columns from {path.name}\n")
 
-    # human review loop
-    state = app.get_state(config)
-    if state.next:
-        print("\n=== plan approval required ===")
-        print(f"proposed plan:\n{state.values['cleaning_plan']}")
-        
-        choice = input("\napprove the plan? (y)es / (e)dit / (q)uit: ").lower()
-        
-        if choice == 'q':
-            print("aborting.")
-            return
-        elif choice == 'e':
-            new_plan = input("enter your edited plan: ")
-            app.update_state(config, {"cleaning_plan": new_plan})
-            print("plan updated.")
-        
-        print("\n--- resuming execution ---")
-        # resume execution
-        for event in app.stream(None, config):
-            for node_name, output in event.items():
-                print(f"\n[node: {node_name}]")
-                if "logs" in output:
-                    for log in output["logs"]:
-                        print(f"  - {log}")
-                
-                if node_name == "validator":
-                    print(f"\nvalidation report:\n{output['analysis_report']}")
+    session = CleaningSession(df, path.name, args.goal)
+    session.run_until_review()
 
-    # final result
-    final_state = app.get_state(config)
-    final_df = final_state.values["current_df"]
-    
-    output_path = "cleaned_data.csv"
-    final_df.to_csv(output_path, index=False)
-    
-    print(f"\n=== cleaning complete ===")
-    print(f"final data saved to: {output_path}")
-    print(f"total steps taken: {len(final_state.values['logs'])}")
-    
-    # logs export
-    with open("cleaning_logs.txt", "w") as f:
-        f.write(f"Agentic Cleaning Logs for {file_path}\n")
-        f.write(f"Goal: {user_context}\n")
-        f.write("-" * 30 + "\n")
-        for log in final_state.values["logs"]:
-            f.write(f"- {log}\n")
-    
-    print("logs exported to: cleaning_logs.txt")
+    plan = session.get_plan()
+    print("proposed plan:")
+    for step in plan:
+        print(f"  {step['id']}: {step['tool']} on {step['columns'] or 'table'} - {step['rationale']}")
+    print("\ndry-run impact:")
+    for impact in simulate_plan(df, plan):
+        print(f"  {impact['id']} {impact['tool']}: {impact['effect']}")
+
+    if not args.yes:
+        answer = input("\napprove this plan? [y/N] ").strip().lower()
+        if answer != "y":
+            print("aborted.")
+            return 0
+
+    print("\nexecuting...")
+    session.resume()
+    summary = session.result_summary()
+    session.learn_from_run()
+
+    Path(args.out).write_text(summary["cleaned_csv"])
+    Path("run_report.md").write_text(build_run_report(summary))
+    Path("clean_recipe.py").write_text(build_recipe_script(summary))
+
+    print(f"\nstatus: {summary['status']}")
+    print(f"quality: {summary['score_before']} -> {summary['score_after']}")
+    print(f"saved: {args.out}, run_report.md, clean_recipe.py")
+    return 0
+
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

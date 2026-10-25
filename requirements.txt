@@ -1,6 +1,13 @@
 langgraph
+langgraph-checkpoint-sqlite
+langchain-core
 langchain-groq
 pandas
+numpy
 python-dotenv
-tabulate
 streamlit
+plotly
+bcrypt
+pydantic
+pydantic-settings
+pytest
