@@ -1,5 +1,6 @@
-"""The main cleaning flow: upload -> context -> analysis -> plan review ->
-live execution -> results. Sections reveal step by step."""
+"""The main cleaning flow: upload -> agent-led EDA -> review suggestions ->
+live execution -> results. The agent explores first and proposes; the user
+decides and can add anything on top."""
 
 from __future__ import annotations
 
@@ -9,11 +10,11 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
-from app.ui import charts
+from app.ui import charts, eda_charts
 from app.ui.components import render_step_timeline, require_user, reset_workspace, run_store
-from app.ui.theme import hero, section, stepper
-from cleanai.core import profiling
-from cleanai.services.pipeline import CleaningSession, revise_plan_with_chat, simulate_plan
+from app.ui.theme import DANGER, SUCCESS, TEXT_MUTED, WARNING, hero, section, stepper
+from cleanai.core import profiling, suggest
+from cleanai.services.pipeline import CleaningSession, simulate_plan
 from cleanai.services.recipe import build_plan_json, build_recipe_script
 from cleanai.services.reporting import build_run_report
 
@@ -24,9 +25,6 @@ SAMPLES = {
     "E-commerce orders (mixed dates, negative prices)": "ecommerce_orders.csv",
     "Survey responses (free-text chaos)": "survey_responses.csv",
 }
-
-CONTEXT_PRESETS = ["ML model training", "BI dashboard / reporting", "Audit & compliance", "General cleanup"]
-
 
 def _stage() -> int:
     return st.session_state.get("ws_stage", 0)
@@ -43,11 +41,12 @@ def workspace_page() -> None:
     _render_upload()
     if "df" not in st.session_state:
         return
-    _render_context()
     if not st.session_state.get("analysis_ready"):
+        _render_explore_cta()
         return
+    _render_eda()
     if "summary" not in st.session_state:
-        _render_review()
+        _render_suggestions()
     else:
         _render_results(user)
 
@@ -92,123 +91,149 @@ def _render_upload() -> None:
             st.dataframe(df.head(50), use_container_width=True)
 
 
-def _render_context() -> None:
-    st.markdown(section(2, "What is this data for?", "The agent plans differently for ML, reporting, or audits."), unsafe_allow_html=True)
-    preset = st.pills("Intended use", CONTEXT_PRESETS, key="context_preset")
-    detail = st.text_input("Anything specific? (optional)",
-                           placeholder="e.g. keep every row, salary must stay in rupees")
-    context = " — ".join(x for x in [preset, detail] if x) or "general cleaning"
-    st.session_state.context_text = context
-
-    if not st.session_state.get("analysis_ready"):
-        if st.button("Analyze dataset", type="primary"):
-            _set_stage(2)
-            session = CleaningSession(
-                st.session_state.df.copy(), st.session_state.file_name, context,
-            )
-            with st.status("Agent is analyzing and planning…", expanded=True) as status:
-                def on_event(node: str, output: dict) -> None:
-                    for line in output.get("logs", []):
-                        st.write(f"• {line}")
-                session.run_until_review(on_event=on_event)
-                status.update(label="Analysis and plan ready", state="complete")
-            st.session_state.cleaning_session = session
-            st.session_state.analysis_ready = True
-            _set_stage(3)
-            st.rerun()
+def _render_explore_cta() -> None:
+    st.markdown(section(2, "Let the agent explore", "It profiles every column, digs into anything suspicious with its inspection tools, and reports back with charts and suggestions."), unsafe_allow_html=True)
+    if st.button("Explore the data", type="primary", icon=":material/travel_explore:"):
+        _set_stage(1)
+        session = CleaningSession(
+            st.session_state.df.copy(), st.session_state.file_name, "",
+        )
+        with st.status("Agent is exploring the data…", expanded=True) as status:
+            def on_event(node: str, output: dict) -> None:
+                for line in output.get("logs", []):
+                    st.write(f"• {line}")
+            session.run_until_review(on_event=on_event)
+            status.update(label="Exploration complete", state="complete")
+        st.session_state.cleaning_session = session
+        st.session_state.analysis_ready = True
+        _set_stage(2)
+        st.rerun()
 
 
-def _render_review() -> None:
+def _render_eda() -> None:
     session: CleaningSession = st.session_state.cleaning_session
     values = session.state_values()
+    bundle = values.get("eda_bundle", {})
 
-    st.markdown(section(3, "What the agent found"), unsafe_allow_html=True)
-    cards = values.get("cards", [])
-    issue_rows = []
-    for card in cards:
-        for issue in card.issues_open:
-            issue_rows.append({"Severity": issue.severity.upper(),
-                               "Column": issue.column or "(table)",
-                               "Issue": issue.kind.replace("_", " "),
-                               "Evidence": issue.evidence})
-    if issue_rows:
-        st.dataframe(pd.DataFrame(issue_rows), use_container_width=True, hide_index=True)
-    else:
-        st.success("No issues detected — this data already looks clean.")
-    with st.expander("Full analysis report"):
-        st.markdown(values.get("analysis_report", ""))
+    st.markdown(section(2, "What the agent found", "A full exploration of your data - read the story, then check the evidence."), unsafe_allow_html=True)
+
+    with st.container(border=True):
+        st.markdown(values.get("analysis_report", "_no report_"))
+
+    chart_tab, issues_tab = st.tabs([":material/monitoring: EDA charts", ":material/rule: Detected issues"])
+    with chart_tab:
+        figs = [
+            eda_charts.missingness(bundle),
+            eda_charts.distributions(bundle),
+            eda_charts.correlation_heatmap(bundle),
+            eda_charts.category_bars(bundle),
+        ]
+        figs = [f for f in figs if f is not None]
+        if not figs:
+            st.info("Nothing to chart - the dataset has no numeric, categorical or missing-value structure to show.")
+        for row_start in range(0, len(figs), 2):
+            cols = st.columns(min(2, len(figs) - row_start))
+            for offset, fig in enumerate(figs[row_start:row_start + 2]):
+                cols[offset].plotly_chart(fig, use_container_width=True)
+        if bundle.get("sampled"):
+            st.caption(f"Statistics computed on a {bundle['sample_rows']:,}-row sample of {bundle['rows']:,} rows; missing counts are exact.")
+
+    with issues_tab:
+        issue_rows = []
+        for card in values.get("cards", []):
+            for issue in card.issues_open:
+                issue_rows.append({"Severity": issue.severity.upper(),
+                                   "Column": issue.column or "(table)",
+                                   "Issue": issue.kind.replace("_", " "),
+                                   "Evidence": issue.evidence})
+        if issue_rows:
+            st.dataframe(pd.DataFrame(issue_rows), use_container_width=True, hide_index=True)
+        else:
+            st.success("No issues detected - this data already looks clean.")
+
     if values.get("case_hints"):
         st.info(f"Memory from similar past runs:\n\n{values['case_hints']}")
 
-    st.markdown(section(4, "Review the plan", "Edit any cell, untick steps you don't want, or tell the agent what to change in plain English."), unsafe_allow_html=True)
 
-    plan = session.get_plan()
-    editor_rows = [{
-        "Run": step.get("status") != "skipped",
-        "Step": step["id"],
-        "Tool": step["tool"],
-        "Columns": ", ".join(step.get("columns") or []),
-        "Params": json.dumps(step.get("params") or {}),
-        "Why": step.get("rationale", ""),
-    } for step in plan]
+SEVERITY_STYLE = {
+    "high": ("HIGH", DANGER, "#FDECEC"),
+    "medium": ("MEDIUM", WARNING, "#FFF6E8"),
+    "low": ("LOW", TEXT_MUTED, "#EEF0F7"),
+}
 
-    edited = st.data_editor(
-        pd.DataFrame(editor_rows),
-        column_config={
-            "Run": st.column_config.CheckboxColumn(width="small"),
-            "Step": st.column_config.TextColumn(disabled=True, width="small"),
-            "Why": st.column_config.TextColumn(disabled=True),
-        },
-        hide_index=True, use_container_width=True, key="plan_editor",
-    )
 
-    with st.expander("Dry-run: what each step would change", expanded=True):
-        impacts = st.session_state.get("plan_impacts")
-        if impacts is None or st.button("Refresh impact preview"):
-            impacts = simulate_plan(st.session_state.df, plan)
-            st.session_state.plan_impacts = impacts
-        for impact in impacts:
-            icon = ":material/check_circle:" if impact["ok"] else ":material/warning:"
-            st.markdown(f"{icon} **{impact['id']} {impact['tool']}** → {impact['effect']}")
+def _severity_chip(severity: str) -> str:
+    label, color, bg = SEVERITY_STYLE.get(severity, SEVERITY_STYLE["medium"])
+    return (f'<span style="background:{bg};color:{color};padding:3px 10px;border-radius:999px;'
+            f'font-size:0.72rem;font-weight:700;letter-spacing:.04em">{label}</span>')
 
-    chat_instruction = st.chat_input("Tell the agent how to change the plan (e.g. 'don't drop any rows')")
-    if chat_instruction:
-        with st.spinner("Revising the plan…"):
-            revised = revise_plan_with_chat(plan, chat_instruction, st.session_state.df)
-        session.update_plan(revised)
+
+def _render_suggestions() -> None:
+    session: CleaningSession = st.session_state.cleaning_session
+    suggestions = session.get_suggestions()
+
+    st.markdown(section(3, "Review the suggestions", "Untick anything you disagree with, or tell the agent what else to do - in your own words."), unsafe_allow_html=True)
+
+    for item in suggestions:
+        key = f"sugg_{item['id']}"
+        with st.container(border=True):
+            check_col, body_col, chip_col = st.columns([0.06, 0.78, 0.16])
+            accepted = check_col.checkbox("include", value=item.get("accepted", True),
+                                          key=key, label_visibility="collapsed")
+            source_tag = " · added by you" if item.get("source") == "user" else ""
+            body_col.markdown(f"**{item['title']}**{source_tag}")
+            why = item.get("why", "")
+            target = ", ".join(item.get("columns") or []) or "whole table"
+            body_col.caption((why + " — " if why else "") + f"`{item['tool']}` on {target}")
+            chip_col.markdown(_severity_chip(item.get("severity", "medium")), unsafe_allow_html=True)
+            item["accepted"] = accepted
+
+    accepted_items = [s for s in suggestions if s.get("accepted", True)]
+    plan_preview = suggest.build_plan(suggestions)
+
+    with st.expander(f"Dry-run: what the {len(accepted_items)} selected fixes would change"):
+        if st.button("Compute impact preview", icon=":material/play_circle:") or st.session_state.get("plan_impacts"):
+            impacts = st.session_state.get("plan_impacts")
+            if impacts is None:
+                impacts = simulate_plan(st.session_state.df, plan_preview)
+                st.session_state.plan_impacts = impacts
+            for impact in impacts:
+                icon = ":material/check_circle:" if impact["ok"] else ":material/warning:"
+                st.markdown(f"{icon} **{impact['tool']}** → {impact['effect']}")
+
+    with st.expander("Execution order (computed automatically)"):
+        for step in plan_preview:
+            st.markdown(f"`{step['id']}` **{step['tool']}** on {step.get('columns') or 'table'} — {step['rationale']}")
+
+    addon = st.chat_input("Add anything in your own words, e.g. 'also lowercase all emails and never drop rows'")
+    if addon:
+        with st.spinner("Turning your request into suggestions…"):
+            session.set_suggestions(suggestions)
+            new_items = session.add_user_request(addon)
+        if new_items:
+            st.toast(f"Added {len(new_items)} suggestion(s) from your request", icon=":material/add_task:")
+        else:
+            st.toast("Could not map that to the toolkit - try rephrasing", icon=":material/help:")
         st.session_state.pop("plan_impacts", None)
-        st.toast("Plan revised", icon=":material/edit:")
         st.rerun()
 
+    goal = st.text_input("Optional note for the agent during execution",
+                         placeholder="e.g. this feeds an ML model; salary is in INR")
+
     run_col, discard_col = st.columns([1, 1])
-    if run_col.button("Approve & run", type="primary", use_container_width=True):
-        _apply_editor_changes(session, plan, edited)
+    if run_col.button(f"Run {len(accepted_items)} fixes", type="primary",
+                      use_container_width=True, disabled=not accepted_items,
+                      icon=":material/rocket_launch:"):
+        session.set_suggestions(suggestions)
+        session.approve(goal)
         _execute(session)
     if discard_col.button("Discard run", use_container_width=True):
         reset_workspace()
         st.rerun()
 
 
-def _apply_editor_changes(session: CleaningSession, plan: list[dict], edited: pd.DataFrame) -> None:
-    by_id = {step["id"]: step for step in plan}
-    final_steps = []
-    for _, row in edited.iterrows():
-        step = by_id.get(row["Step"])
-        if step is None or not row["Run"]:
-            continue
-        step = dict(step)
-        step["tool"] = str(row["Tool"]).strip()
-        step["columns"] = [c.strip() for c in str(row["Columns"]).split(",") if c.strip()]
-        try:
-            step["params"] = json.loads(row["Params"] or "{}")
-        except json.JSONDecodeError:
-            pass
-        final_steps.append(step)
-    session.update_plan(final_steps)
-
-
 def _execute(session: CleaningSession) -> None:
-    _set_stage(4)
+    _set_stage(3)
     timeline = st.empty()
     with st.status("Cleaning in progress…", expanded=True) as status:
         def on_event(node: str, output: dict) -> None:
@@ -222,7 +247,7 @@ def _execute(session: CleaningSession) -> None:
         session.resume(on_event=on_event)
         status.update(label="Run finished", state="complete")
     st.session_state.summary = session.result_summary()
-    _set_stage(5)
+    _set_stage(4)
     st.rerun()
 
 
@@ -230,7 +255,7 @@ def _render_results(user: dict) -> None:
     summary = st.session_state.summary
     session: CleaningSession = st.session_state.cleaning_session
 
-    st.markdown(section(5, "Results"), unsafe_allow_html=True)
+    st.markdown(section(4, "Results"), unsafe_allow_html=True)
 
     lift = summary["score_after"] - summary["score_before"]
     notes = {
@@ -330,7 +355,7 @@ def _render_results(user: dict) -> None:
             if record.get("error"):
                 st.caption(f"error: {record['error']}")
 
-    st.markdown(section(6, "Take it with you", "Everything is reusable: the data, the report, and a script that re-runs this cleaning anywhere."), unsafe_allow_html=True)
+    st.markdown(section(5, "Take it with you", "Everything is reusable: the data, the report, and a script that re-runs this cleaning anywhere."), unsafe_allow_html=True)
     d1, d2, d3, d4 = st.columns(4)
     d1.download_button("Cleaned CSV", summary["cleaned_csv"], icon=":material/download:",
                        file_name=f"cleaned_{summary['dataset_name']}", type="primary",

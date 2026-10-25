@@ -61,3 +61,5 @@ def reset_workspace() -> None:
     for key in ("ws_stage", "df", "file_name", "context_text", "cleaning_session",
                 "analysis_ready", "summary", "saved_run_id", "plan_impacts"):
         st.session_state.pop(key, None)
+    for key in [k for k in st.session_state if str(k).startswith("sugg_")]:
+        st.session_state.pop(key, None)

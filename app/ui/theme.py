@@ -232,7 +232,7 @@ div[data-testid="stAlert"] {{
 # shared HTML components
 # ---------------------------------------------------------------------------
 
-STAGES = ["Upload", "Context", "Analysis", "Plan", "Execute", "Results"]
+STAGES = ["Upload", "Explore", "Review", "Execute", "Results"]
 
 
 def stepper(active_index: int) -> str:
