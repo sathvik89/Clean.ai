@@ -50,9 +50,10 @@ class AgentState(TypedDict):
     stagnation_rounds: int
     run_error: str
 
-    # loop counters
+    # loop counters and spend
     tool_rounds: int
     validation_rounds: int
+    tokens_used: Annotated[int, operator.add]
 
     logs: Annotated[List[str], append_logs]
     messages: Annotated[List, keep_recent_messages]
@@ -79,6 +80,7 @@ def initial_state(df: pd.DataFrame, file_name: str, user_context: str) -> AgentS
         run_error="",
         tool_rounds=0,
         validation_rounds=0,
+        tokens_used=0,
         logs=[],
         messages=[],
     )

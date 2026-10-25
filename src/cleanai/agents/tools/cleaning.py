@@ -80,6 +80,22 @@ def handle_missing(
     return out
 
 
+def normalize_nulls(df: pd.DataFrame, columns: Optional[List[str]] = None) -> pd.DataFrame:
+    """Turn disguised null tokens ('N/A', '-', 'null', ...) into real NaN."""
+    from cleanai.core.profiling import NULL_TOKENS, is_text_like
+
+    out = df.copy()
+    target_columns = columns if columns else list(out.columns)
+    for col in target_columns:
+        if col not in out.columns:
+            continue
+        if not is_text_like(out[col]):
+            continue
+        mask = out[col].notna() & out[col].astype(str).str.strip().str.lower().isin(NULL_TOKENS)
+        out.loc[mask, col] = pd.NA
+    return out
+
+
 def remove_duplicates(df: pd.DataFrame, columns: Optional[List[str]] = None) -> pd.DataFrame:
     valid = [c for c in columns if c in df.columns] if columns else None
     return df.drop_duplicates(subset=valid or None).copy()

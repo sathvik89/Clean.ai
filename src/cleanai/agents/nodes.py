@@ -16,7 +16,7 @@ from typing import Any, Dict, List
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 
 from cleanai.agents import prompts
-from cleanai.agents.llm import build_llm, invoke_with_retry
+from cleanai.agents.llm import build_llm, invoke_with_retry, usage_tokens
 from cleanai.agents.state import AgentState
 from cleanai.agents.tools import registry
 from cleanai.config import get_settings
@@ -61,6 +61,7 @@ def analyzer_node(state: AgentState) -> Dict[str, Any]:
     )
     log_line("analyzer", "analysis report ready")
     return {
+        "tokens_used": usage_tokens(response),
         "cards": cards,
         "analysis_report": response.content,
         "case_hints": hints,
@@ -138,6 +139,7 @@ def planner_node(state: AgentState) -> Dict[str, Any]:
         log_line("planner", "llm plan unusable, using deterministic fallback")
     log_line("planner", f"plan ready with {len(steps)} steps ({source})")
     return {
+        "tokens_used": usage_tokens(response),
         "plan_steps": planning.steps_to_dicts(steps),
         "current_step_index": 0,
         "mode": "plan",
@@ -200,7 +202,7 @@ def executor_node(state: AgentState) -> Dict[str, Any]:
     )
     call_count = len(response.tool_calls) if getattr(response, "tool_calls", None) else 0
     log_line("executor", f"model proposed {call_count} tool call(s)")
-    return {"messages": [response]}
+    return {"messages": [response], "tokens_used": usage_tokens(response)}
 
 
 # ---------------------------------------------------------------------------
@@ -253,12 +255,24 @@ def tool_handler_node(state: AgentState) -> Dict[str, Any]:
         delta_text = ""
         if result.mutated:
             after = profiling.snapshot(result.df)
-            delta = profiling.metrics_delta(before, after)
-            delta_text = profiling.render_delta(delta)
-            if delta:
-                df = result.df
+            rows_dropped = before["rows"] - after["rows"]
+            drop_pct = 100.0 * rows_dropped / max(before["rows"], 1)
+            if drop_pct > settings.max_row_drop_pct:
+                result = registry.ToolResult(
+                    message=(
+                        f"guardrail: refused - this call would delete {rows_dropped} rows "
+                        f"({drop_pct:.0f}%), above the {settings.max_row_drop_pct:.0f}% safety cap. "
+                        "Repair values instead of dropping rows."
+                    ),
+                    status="error",
+                )
             else:
-                result.status = "noop" if result.status == "ok" else result.status
+                delta = profiling.metrics_delta(before, after)
+                delta_text = profiling.render_delta(delta)
+                if delta:
+                    df = result.df
+                else:
+                    result.status = "noop" if result.status == "ok" else result.status
         record = ActionRecord(
             seq=ledger_seq, tool=name, args=args,
             status=result.status if result.status != "blocked" else "ok",

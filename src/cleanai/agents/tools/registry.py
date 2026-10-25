@@ -115,6 +115,12 @@ def _get_summary(df: pd.DataFrame) -> ToolResult:
     return ToolResult(message=profiling.summarize_for_llm(df))
 
 
+@register("normalize_nulls", "Convert disguised null text like 'N/A', '-', 'null' into real missing values. Run this before filling missing values.", RemoveDuplicatesArgs, mutates=True)
+def _normalize_nulls(df: pd.DataFrame, columns=None) -> ToolResult:
+    result = cleaning.normalize_nulls(df, columns)
+    return ToolResult(message="disguised nulls converted to real missing values", df=result)
+
+
 @register("handle_missing", "Fill or drop missing values in one or more columns.", HandleMissingArgs, mutates=True)
 def _handle_missing(df: pd.DataFrame, strategy: str, columns=None, fill_value=None) -> ToolResult:
     result = cleaning.handle_missing(df, strategy, columns, fill_value)

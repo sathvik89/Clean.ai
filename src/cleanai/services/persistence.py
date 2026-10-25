@@ -38,6 +38,7 @@ class RunStore:
                     score_before INTEGER, score_after INTEGER,
                     steps_json TEXT, ledger_json TEXT, logs_text TEXT,
                     analysis_report TEXT,
+                    tokens_used INTEGER DEFAULT 0,
                     cleaned_csv TEXT
                 );
                 CREATE INDEX IF NOT EXISTS idx_runs_user ON runs(user_id, created_at DESC);
@@ -53,8 +54,8 @@ class RunStore:
                     rows_before, rows_after, cols_before, cols_after,
                     nulls_before, nulls_after, duplicates_before, duplicates_after,
                     score_before, score_after, steps_json, ledger_json, logs_text,
-                    analysis_report, cleaned_csv
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    analysis_report, tokens_used, cleaned_csv
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     user_id,
@@ -72,6 +73,7 @@ class RunStore:
                     json.dumps(payload.get("ledger", []), default=str),
                     payload.get("logs_text", ""),
                     payload.get("analysis_report", ""),
+                    payload.get("tokens_used", 0),
                     payload.get("cleaned_csv", ""),
                 ),
             )

@@ -22,6 +22,11 @@ def build_llm(json_mode: bool = False, api_key: str | None = None) -> ChatGroq:
     )
 
 
+def usage_tokens(response) -> int:
+    usage = getattr(response, "usage_metadata", None) or {}
+    return int(usage.get("total_tokens", 0))
+
+
 def invoke_with_retry(llm, messages, attempts: int = 3):
     """Groq's free tier throttles aggressively; back off and retry."""
     last_error = None

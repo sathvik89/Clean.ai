@@ -17,6 +17,34 @@ import pandas as pd
 from pandas.api.types import is_datetime64_any_dtype, is_numeric_dtype
 
 EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+PHONE_PATTERN = re.compile(r"^\+?[\d\s\-()]{7,16}$")
+
+# text values that really mean "missing" but hide from isnull()
+NULL_TOKENS = {"n/a", "na", "null", "none", "nan", "-", "--", "?", "missing", "unknown", ""}
+
+
+def mask_value(value: str) -> str:
+    """Type-preserving mask for sample values that look like PII."""
+    text = str(value)
+    if EMAIL_PATTERN.match(text):
+        local, _, domain = text.partition("@")
+        return f"{local[:1]}***@{domain}"
+    if PHONE_PATTERN.match(text) and sum(c.isdigit() for c in text) >= 7:
+        digits = sum(c.isdigit() for c in text)
+        return f"***{text[-2:]} ({digits} digits)"
+    return text
+
+
+def is_text_like(series: pd.Series) -> bool:
+    """True for object/str/string dtypes across pandas 2.x and 3.x."""
+    return series.dtype == object or str(series.dtype) in ("str", "string") or str(series.dtype).startswith("string")
+
+
+def count_disguised_nulls(series: pd.Series) -> int:
+    if not is_text_like(series):
+        return 0
+    text = series.dropna().astype(str).str.strip().str.lower()
+    return int(text.isin(NULL_TOKENS).sum())
 
 
 @dataclass
@@ -134,6 +162,13 @@ def detect_column_issues(df: pd.DataFrame, card: ColumnCard) -> List[Issue]:
     series = df[card.name]
     non_null = series.dropna()
 
+    disguised = count_disguised_nulls(series)
+    if disguised > 0:
+        issues.append(Issue(
+            "disguised_nulls", card.name, "high",
+            f"{disguised} text values like 'N/A'/'-' that mean missing",
+        ))
+
     if card.null_count > 0:
         severity = "high" if card.null_pct > 20 else "medium"
         issues.append(Issue(
@@ -236,7 +271,7 @@ def build_cards(df: pd.DataFrame) -> List[ColumnCard]:
             null_count=null_count,
             null_pct=100.0 * null_count / row_count,
             n_unique=int(series.nunique(dropna=True)),
-            sample_values=[str(v)[:40] for v in series.dropna().head(3)],
+            sample_values=[mask_value(str(v)[:40]) for v in series.dropna().head(3)],
         )
         card.issues_open = detect_column_issues(df, card)
         if not card.issues_open:
@@ -264,7 +299,7 @@ def refresh_cards(df: pd.DataFrame, cards: List[ColumnCard]) -> List[ColumnCard]
             null_count=null_count,
             null_pct=100.0 * null_count / row_count,
             n_unique=int(series.nunique(dropna=True)),
-            sample_values=[str(v)[:40] for v in series.dropna().head(3)],
+            sample_values=[mask_value(str(v)[:40]) for v in series.dropna().head(3)],
             fixes_applied=list(old.fixes_applied) if old else [],
         )
         card.issues_open = detect_column_issues(df, card)
@@ -348,6 +383,36 @@ def summarize_for_llm(df: pd.DataFrame, cards: Optional[List[ColumnCard]] = None
     if len(cards) > 40:
         lines.append(f"(+{len(cards) - 40} more columns not shown)")
     return "\n".join(lines)
+
+
+def dimension_scores(df: pd.DataFrame, cards: Optional[List[ColumnCard]] = None) -> Dict[str, int]:
+    """Quality broken into four 0-100 dimensions for the scorecard."""
+    if df.empty or len(df.columns) == 0:
+        return {"completeness": 0, "validity": 0, "uniqueness": 0, "consistency": 0}
+    cards = cards or build_cards(df)
+    issues = all_open_issues(df, cards)
+
+    completeness = 100.0 - 100.0 * df.isnull().sum().sum() / max(df.size, 1)
+    disguised = sum(count_disguised_nulls(df[c]) for c in df.columns)
+    completeness -= 100.0 * disguised / max(df.size, 1)
+
+    validity_kinds = {"invalid_email", "invalid_dates", "non_numeric_values",
+                      "out_of_range", "negative_values", "future_dates"}
+    validity = 100.0 - 12.0 * sum(1 for i in issues if i.kind in validity_kinds)
+
+    dup_rows = int(df.duplicated().sum())
+    uniqueness = 100.0 - 100.0 * dup_rows / max(len(df), 1)
+    uniqueness -= 10.0 * sum(1 for i in issues if i.kind == "duplicate_key_values")
+
+    consistency_kinds = {"mixed_types", "wrong_dtype"}
+    consistency = 100.0 - 15.0 * sum(1 for i in issues if i.kind in consistency_kinds)
+
+    return {
+        "completeness": max(0, min(100, round(completeness))),
+        "validity": max(0, min(100, round(validity))),
+        "uniqueness": max(0, min(100, round(uniqueness))),
+        "consistency": max(0, min(100, round(consistency))),
+    }
 
 
 def quality_score(df: pd.DataFrame, cards: Optional[List[ColumnCard]] = None) -> int:

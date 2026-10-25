@@ -1,0 +1,15 @@
+langgraph>=0.2
+langgraph-checkpoint-sqlite
+langchain-core>=0.3
+langchain-groq>=0.2
+pandas>=2.0
+numpy
+python-dotenv
+streamlit>=1.35
+plotly>=5.20
+bcrypt>=4.0
+pydantic>=2.0
+pydantic-settings>=2.0
+
+[dev]
+pytest>=8.0

@@ -21,6 +21,7 @@ from cleanai.core.memory import CaseMemory, dataset_fingerprint
 # which issue kinds each tool plausibly addresses, used to turn a finished
 # run into case-memory strategies
 TOOL_ISSUE_MAP = {
+    "normalize_nulls": {"disguised_nulls"},
     "handle_missing": {"missing_values"},
     "remove_duplicates": {"duplicate_rows", "duplicate_key_values"},
     "convert_types": {"wrong_dtype", "non_numeric_values", "invalid_dates", "mixed_types"},
@@ -30,6 +31,72 @@ TOOL_ISSUE_MAP = {
 }
 
 ProgressCallback = Callable[[str, Dict[str, Any]], None]
+
+
+def simulate_plan(df: pd.DataFrame, steps: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Dry-run every plan step on a copy and report what each would change.
+
+    Shown in the review screen so approval is an informed decision.
+    """
+    from cleanai.agents.tools import registry
+
+    working = df.copy()
+    impacts = []
+    for step in steps:
+        args = dict(step.get("params") or {})
+        if step.get("columns"):
+            args.setdefault("columns", step["columns"])
+        before = profiling.snapshot(working)
+        result = registry.execute(step["tool"], working, args)
+        impact = {"id": step.get("id"), "tool": step["tool"], "ok": result.status == "ok"}
+        if result.mutated and result.status == "ok":
+            after = profiling.snapshot(result.df)
+            delta = profiling.metrics_delta(before, after)
+            impact["effect"] = profiling.render_delta(delta)
+            working = result.df
+        elif result.status == "error":
+            impact["effect"] = result.message[:160]
+        else:
+            impact["effect"] = "no data change (inspection only)"
+        impacts.append(impact)
+    return impacts
+
+
+def revise_plan_with_chat(
+    steps: List[Dict[str, Any]],
+    instruction: str,
+    df: pd.DataFrame,
+    api_key: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """Let the user edit the plan in natural language; returns new steps
+    (or the original plan unchanged if the model's output is unusable)."""
+    import json as json_module
+
+    from langchain_core.messages import HumanMessage, SystemMessage
+
+    from cleanai.agents.llm import build_llm, invoke_with_retry
+    from cleanai.agents.prompts import SYSTEM_PROMPT
+    from cleanai.agents.tools import registry
+    from cleanai.core import plan as planning
+
+    prompt = (
+        "Here is the current cleaning plan as JSON:\n"
+        f"{json_module.dumps({'steps': steps}, default=str)}\n\n"
+        f"Available tools:\n{registry.tool_signatures()}\n\n"
+        f"The user wants this change: {instruction}\n\n"
+        "Return the FULL revised plan as JSON with the same schema "
+        '({"steps": [...]}). Keep unrelated steps unchanged. JSON only.'
+    )
+    response = invoke_with_retry(
+        build_llm(json_mode=True, api_key=api_key),
+        [SystemMessage(content=SYSTEM_PROMPT), HumanMessage(content=prompt)],
+    )
+    revised = planning.parse_plan(
+        response.content,
+        valid_tools=list(registry.REGISTRY.keys()),
+        valid_columns=[str(c) for c in df.columns],
+    )
+    return planning.steps_to_dicts(revised) if revised else steps
 
 
 class CleaningSession:
@@ -96,6 +163,7 @@ class CleaningSession:
             "steps": values.get("plan_steps", []),
             "ledger": values.get("ledger", []),
             "logs_text": "\n".join(values.get("logs", [])),
+            "tokens_used": values.get("tokens_used", 0),
             "analysis_report": values.get("analysis_report", ""),
             "cleaned_csv": df_after.to_csv(index=False),
         }

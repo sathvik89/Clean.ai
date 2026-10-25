@@ -44,15 +44,17 @@ Output JSON matching exactly this schema:
 Planning rules:
 1. Fix structure first: type conversions and renames before value fixes.
 2. Remove duplicate rows early, keyed on id/email columns when they exist.
-3. Repair impossible values (negative ages, future dates, bad emails) before \
+3. If any column has disguised null text like 'N/A' or '-', run normalize_nulls \
+before anything that depends on real missing values.
+4. Repair impossible values (negative ages, future dates, bad emails) before \
 filling missing values, so bad values do not leak into statistics.
-4. Fill missing values after types are correct: median for numeric, mode for \
+5. Fill missing values after types are correct: median for numeric, mode for \
 categorical, interpolate for time-like data.
-5. Standardize text casing/whitespace near the end.
-6. Only encode categoricals if the user's goal is ML modeling.
-7. One tool per step, 3 to 9 steps total. Reference only real column names \
+6. Standardize text casing/whitespace near the end.
+7. Only encode categoricals if the user's goal is ML modeling.
+8. One tool per step, 3 to 9 steps total. Reference only real column names \
 from the profile. priority: 1=critical, 2=normal, 3=nice-to-have.
-8. params holds the tool arguments other than columns, e.g. \
+9. params holds the tool arguments other than columns, e.g. \
 {{"strategy": "median"}} for handle_missing or \
 {{"column_type_map": {{"age": "int"}}}} for convert_types.
 

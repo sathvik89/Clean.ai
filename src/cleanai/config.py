@@ -32,6 +32,9 @@ class Settings(BaseSettings):
     max_step_attempts: int = 3
     max_stagnation_rounds: int = 2
 
+    # safety: a single tool call may never delete more than this share of rows
+    max_row_drop_pct: float = 40.0
+
     # context budget (approximate tokens) for the executor turn
     ledger_max_entries: int = 15
     tool_output_max_chars: int = 2400
