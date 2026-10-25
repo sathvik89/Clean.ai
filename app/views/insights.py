@@ -33,7 +33,7 @@ def insights_page() -> None:
     fig = go.Figure(go.Bar(x=by_day["day"], y=by_day["runs"], marker=dict(color=PRIMARY),
                            hovertemplate="%{x}: %{y} runs<extra></extra>"))
     fig.update_layout(title="Runs per day", showlegend=False, **LAYOUT_DEFAULTS)
-    fig.update_xaxes(**GRID)
+    fig.update_xaxes(type="category", **GRID)
     fig.update_yaxes(**GRID)
     st.plotly_chart(fig, use_container_width=True)
 
