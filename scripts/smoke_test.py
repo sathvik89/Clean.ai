@@ -34,15 +34,16 @@ def main() -> int:
     df = make_messy_dataset()
     print(f"input: {len(df)} rows, issues seeded on purpose\n")
 
-    session = CleaningSession(df, "smoke_test.csv", "ML modeling on employee data")
+    session = CleaningSession(df, "smoke_test.csv", "")
     session.run_until_review(on_event=lambda node, out: print(f"  [{node}] done"))
 
-    plan = session.get_plan()
-    print(f"\nplan ({len(plan)} steps):")
-    for step in plan:
-        print(f"  {step['id']}: {step['tool']} on {step['columns'] or 'table'} - {step['rationale']}")
+    suggestions = session.get_suggestions()
+    print(f"\nsuggestions ({len(suggestions)}):")
+    for item in suggestions:
+        print(f"  [{item['severity']}] {item['title']} -> {item['tool']} on {item['columns'] or 'table'}")
 
-    print("\ndry-run impact:")
+    plan = session.approve("ML modeling on employee data")
+    print(f"\ncompiled plan ({len(plan)} steps); dry-run impact:")
     for impact in simulate_plan(df, plan):
         print(f"  {impact['id']} {impact['tool']}: {impact['effect']}")
 

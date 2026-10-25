@@ -8,27 +8,52 @@ Built on LangGraph + Groq, with a Streamlit front end.
 
 ## What it does
 
-1. **Analyze** — deterministic profiling builds a *column card* for every column
-   (role, type, key-ness, sample values) and detects real problems: missing
-   values, disguised nulls (`"N/A"`, `"-"`, `"null"` hiding as text), duplicate
-   rows and keys, wrong dtypes, invalid emails/dates, impossible ages, negative
-   salaries, future dates, mixed types.
-2. **Plan** — the LLM produces a structured JSON plan (tool, columns, params,
-   rationale, priority per step), validated against the tool registry. Unusable
-   plans fall back to a deterministic plan, so the run never dies on bad JSON.
-3. **Human review** — the run pauses. You see the issues table, the full plan in
-   an editable grid, and a **dry-run impact preview** ("this step would drop 3
-   rows, fix 24 nulls") before anything touches your data. Edit cells, untick
-   steps, or just type "don't drop any rows" — the plan is revised in place.
-4. **Execute** — the agent works step by step through the plan with tool calls,
-   streaming a live timeline. Every action is recorded in a ledger with its
-   measured effect.
+1. **Explore (agent-led EDA)** — deterministic profiling builds a *column card*
+   for every column and a full EDA bundle (distributions, correlations,
+   missingness, category frequencies). The agent then *investigates* anything
+   surprising with read-only inspection tools it chooses itself — `value_counts`,
+   `describe`, `correlation_pairs`, `sample_rows` — before writing a narrative
+   EDA report backed by charts.
+2. **Suggest** — from the EDA, the agent proposes cleaning **suggestions**: each
+   one a card with a title, reason, severity, and the exact tool + parameters it
+   maps to. Detected issues cover missing values, disguised nulls (`"N/A"`,
+   `"-"`), duplicates, wrong dtypes, invalid emails/dates, impossible values and
+   more. If the model's JSON is unusable, deterministic fallback suggestions
+   keep the run alive.
+3. **You decide** — untick anything you disagree with, see a **dry-run impact
+   preview** ("would drop 3 rows, fix 24 nulls") before anything touches your
+   data, and add your own asks in plain English ("also lowercase emails, never
+   drop rows") — they become first-class suggestions too. Accepted suggestions
+   compile deterministically into an ordered plan: structure fixes before value
+   fixes before cosmetics.
+4. **Execute** — the agent works the plan step by step with its 23-tool kit,
+   streaming a live timeline. Every action lands in a ledger with its measured
+   effect.
 5. **Validate & repair** — a deterministic validator re-profiles the result; if
    issues remain, the agent enters a repair loop focused on exactly those issues.
 6. **Deliver** — quality scores before/after (overall + four dimensions),
-   comparison charts, the cleaned CSV, a markdown run report, the plan as JSON,
-   and a **recipe**: a standalone pandas script that reproduces the cleaning on
-   next month's file with no API key.
+   comparison charts, a per-column scorecard, highlighted diffs, the cleaned
+   CSV, a markdown report, the plan as JSON, and a **recipe**: a standalone
+   pandas script that reproduces the cleaning on next month's file with no API
+   key. Past recipes can be re-applied to new files instantly from run history.
+
+## Measured performance
+
+Numbers from live runs against Groq `openai/gpt-oss-120b` (see
+`scripts/smoke_test.py` and `scripts/scale_test.py`):
+
+| benchmark | result |
+|---|---|
+| 153,000-row messy dataset | quality **22 → 100**, 38,373 missing cells fixed, status *clean* |
+| wall time for that run | **102 s** end to end |
+| LLM cost at 153k rows | **~26k tokens** — same order as an 8-row file, because the model only ever sees compact profiles, never the data |
+| 8-row seeded-chaos dataset | quality **15 → 100**, status *clean* |
+| automated tests | **75 passing**, including scripted-LLM full-graph integration tests |
+| agent toolkit | **23 tools** (17 cleaning + 6 read-only inspection) |
+
+Dataset size is bounded by your machine's RAM, not by the model: profiling
+samples 50k rows for the expensive statistics while keeping missing/duplicate
+counts exact.
 
 ## Engineering highlights
 
@@ -64,6 +89,10 @@ and cache-friendly.
 schema, and handler are declared once. The same registry builds the LLM tool
 bindings, validates calls, dispatches execution, and powers the dry-run
 simulator — the schema the model sees can never drift from the code that runs.
+The kit goes well beyond drop/fill: group-wise imputation, category
+standardization (fuzzy label merging), number extraction from text like
+'₹55,000', robust date parsing, explicit value mapping, and flag-instead-of-drop
+for suspicious rows.
 
 **Observability.** Token usage is tracked per run and stored with the full run
 record (plan, ledger, logs, analysis, cleaned data) in SQLite, per user.

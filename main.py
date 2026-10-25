@@ -35,19 +35,22 @@ def main() -> int:
     session = CleaningSession(df, path.name, args.goal)
     session.run_until_review()
 
-    plan = session.get_plan()
-    print("proposed plan:")
-    for step in plan:
-        print(f"  {step['id']}: {step['tool']} on {step['columns'] or 'table'} - {step['rationale']}")
-    print("\ndry-run impact:")
-    for impact in simulate_plan(df, plan):
-        print(f"  {impact['id']} {impact['tool']}: {impact['effect']}")
+    print("eda report:\n")
+    print(session.state_values().get("analysis_report", ""))
+    suggestions = session.get_suggestions()
+    print(f"\nsuggested fixes ({len(suggestions)}):")
+    for item in suggestions:
+        print(f"  [{item['severity']}] {item['title']} -> {item['tool']} on {item['columns'] or 'table'}")
 
     if not args.yes:
-        answer = input("\napprove this plan? [y/N] ").strip().lower()
+        answer = input("\nrun all suggested fixes? [y/N] ").strip().lower()
         if answer != "y":
             print("aborted.")
             return 0
+    plan = session.approve(args.goal)
+    print("\ndry-run impact:")
+    for impact in simulate_plan(df, plan):
+        print(f"  {impact['id']} {impact['tool']}: {impact['effect']}")
 
     print("\nexecuting...")
     session.resume()

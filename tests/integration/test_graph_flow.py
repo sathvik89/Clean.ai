@@ -1,4 +1,4 @@
-"""Runs the whole analyzer -> planner -> executor -> validator graph with a
+"""Runs the whole analyzer -> eda -> executor -> validator graph with a
 scripted fake LLM, so the agent loop is tested deterministically and
 without any API key."""
 
@@ -19,15 +19,21 @@ def dirty_df():
     })
 
 
-PLAN_JSON = json.dumps({"steps": [
-    {"id": "s1", "tool": "convert_types", "columns": [],
-     "params": {"column_type_map": {"age": "float"}},
-     "rationale": "age is numeric stored as text", "priority": 1},
-    {"id": "s2", "tool": "remove_duplicates", "columns": [], "params": {},
-     "rationale": "drop exact duplicate rows", "priority": 1},
-    {"id": "s3", "tool": "handle_missing", "columns": ["age"],
-     "params": {"strategy": "median"}, "rationale": "fill missing age", "priority": 2},
-]})
+EDA_REPORT_JSON = json.dumps({
+    "narrative": {
+        "overview": "Small table with age stored as text and one duplicate row.",
+        "key_findings": ["age is numeric text", "one exact duplicate"],
+        "risks": ["missing age value"],
+    },
+    "suggestions": [
+        {"title": "Convert age to numbers", "why": "stored as text", "severity": "high",
+         "tool": "convert_types", "columns": [], "params": {"column_type_map": {"age": "float"}}},
+        {"title": "Remove duplicate rows", "why": "one exact duplicate", "severity": "high",
+         "tool": "remove_duplicates", "columns": [], "params": {}},
+        {"title": "Fill missing age", "why": "one null", "severity": "medium",
+         "tool": "handle_missing", "columns": ["age"], "params": {"strategy": "median"}},
+    ],
+})
 
 
 def tool_call_message(name, args, call_id):
@@ -36,8 +42,12 @@ def tool_call_message(name, args, call_id):
 
 def scripted_run_messages():
     return [
-        AIMessage(content="analysis: age stored as text, duplicates present"),
-        AIMessage(content=PLAN_JSON),
+        # eda investigation: one lookup, then a closing note
+        tool_call_message("value_counts", {"column": "age"}, "i1"),
+        AIMessage(content="age holds numeric text; city labels look fine."),
+        # eda report with suggestions
+        AIMessage(content=EDA_REPORT_JSON),
+        # executor works the compiled plan
         tool_call_message("convert_types", {"column_type_map": {"age": "float"}}, "c1"),
         tool_call_message("remove_duplicates", {}, "c2"),
         tool_call_message("handle_missing", {"strategy": "median", "columns": ["age"]}, "c3"),
@@ -70,9 +80,13 @@ def test_full_run_cleans_the_data(scripted_graph, dirty_df):
     assert df["age"].isnull().sum() == 0     # nulls filled
     assert str(df["age"].dtype) == "float64"
 
-    # plan steps were tracked to completion
+    # eda produced a narrative and suggestions, which compiled into the plan
+    assert "duplicate" in final["analysis_report"]
+    assert len(final["suggestions"]) == 3
+    assert len(final["plan_steps"]) == 3
+    # structure fix ordered before value fixes regardless of model order
+    assert final["plan_steps"][0]["tool"] == "convert_types"
     assert all(step["status"] == "done" for step in final["plan_steps"])
-    # ledger recorded every action with its effect
     assert len(final["ledger"]) == 3
     assert all(record["status"] == "ok" for record in final["ledger"])
 
@@ -83,12 +97,13 @@ def test_duplicate_calls_are_short_circuited(monkeypatch, isolated_storage):
     from cleanai.agents.state import initial_state
 
     clean_df = pd.DataFrame({"value": [1.0, 2.0, 3.0, 1000.0]})
+    report = json.dumps({"narrative": {"overview": "fine"}, "suggestions": [
+        {"title": "Inspect outliers", "severity": "low",
+         "tool": "detect_outliers", "columns": ["value"], "params": {}},
+    ]})
     messages = [
-        AIMessage(content="analysis"),
-        AIMessage(content=json.dumps({"steps": [
-            {"id": "s1", "tool": "detect_outliers", "columns": ["value"], "params": {},
-             "rationale": "inspect", "priority": 1},
-        ]})),
+        AIMessage(content="nothing surprising"),          # eda: no lookups
+        AIMessage(content=report),
         # same read-only call twice: second one must be blocked as duplicate
         tool_call_message("detect_outliers", {"columns": ["value"]}, "c1"),
         tool_call_message("detect_outliers", {"columns": ["value"]}, "c2"),
@@ -112,12 +127,13 @@ def test_row_drop_guardrail_blocks_mass_deletion(monkeypatch, isolated_storage):
     from cleanai.agents.state import initial_state
 
     df = pd.DataFrame({"v": [1.0, None, None, None, 5.0], "k": [1, 2, 3, 4, 5]})
+    report = json.dumps({"narrative": {"overview": "nulls in v"}, "suggestions": [
+        {"title": "Drop null rows", "severity": "high",
+         "tool": "handle_missing", "columns": ["v"], "params": {"strategy": "drop"}},
+    ]})
     messages = [
-        AIMessage(content="analysis"),
-        AIMessage(content=json.dumps({"steps": [
-            {"id": "s1", "tool": "handle_missing", "columns": ["v"],
-             "params": {"strategy": "drop"}, "rationale": "drop nulls", "priority": 1},
-        ]})),
+        AIMessage(content="v is mostly missing"),
+        AIMessage(content=report),
         tool_call_message("handle_missing", {"strategy": "drop", "columns": ["v"]}, "c1"),
         tool_call_message("handle_missing", {"strategy": "median", "columns": ["v"]}, "c2"),
     ]
@@ -130,8 +146,34 @@ def test_row_drop_guardrail_blocks_mass_deletion(monkeypatch, isolated_storage):
         pass
     final = graph.get_state(config).values
 
-    # the drop (80% of rows) was refused, the median fill then succeeded
+    # the drop (60% of rows) was refused, the median fill then succeeded
     assert len(final["current_df"]) == 5
     assert final["current_df"]["v"].isnull().sum() == 0
     assert any(record["status"] == "error" and "guardrail" in record["error"]
                for record in final["ledger"])
+
+
+def test_unusable_report_falls_back_to_deterministic_suggestions(monkeypatch, isolated_storage, dirty_df):
+    from cleanai.agents import nodes
+    from cleanai.agents.graph import build_graph
+    from cleanai.agents.state import initial_state
+
+    messages = [
+        AIMessage(content="looks odd"),
+        AIMessage(content="sorry, I cannot produce JSON today"),
+        # fallback suggestions still compile into a runnable plan
+        tool_call_message("convert_types", {"column_type_map": {"age": "float"}}, "c1"),
+        tool_call_message("remove_duplicates", {}, "c2"),
+        tool_call_message("handle_missing", {"strategy": "median", "columns": ["age"]}, "c3"),
+        tool_call_message("clean_text", {"columns": ["city"], "actions": ["strip"]}, "c4"),
+    ]
+    llm = make_scripted_llm(messages)
+    monkeypatch.setattr(nodes, "build_llm", lambda *a, **k: llm)
+    graph = build_graph(with_human_review=False)
+
+    config = {"configurable": {"thread_id": "fallback-run"}}
+    for _ in graph.stream(initial_state(dirty_df, "f.csv", ""), config):
+        pass
+    final = graph.get_state(config).values
+    assert final["suggestions"], "fallback suggestions should exist"
+    assert final["plan_steps"], "plan should compile from fallback suggestions"

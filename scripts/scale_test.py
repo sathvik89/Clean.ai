@@ -48,8 +48,10 @@ def main() -> int:
           f"({df.memory_usage(deep=True).sum() / 1e6:.0f} MB in memory)")
 
     started = time.time()
-    session = CleaningSession(df, "scale_test.csv", "ML modeling")
+    session = CleaningSession(df, "scale_test.csv", "")
     session.run_until_review()
+    print(f"suggestions proposed: {len(session.get_suggestions())}")
+    session.approve("ML modeling")
     session.resume()
     summary = session.result_summary()
 
