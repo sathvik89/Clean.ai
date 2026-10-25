@@ -1,0 +1,83 @@
+order_id,customer,order_date,amount,qty,status
+ORD-1000,cust_18,2023/04/09,-42.56,two,SHIPPED
+ORD-1001,cust_26,,239.84,5,shipped
+ORD-1002,cust_40,,281.37,2,cancelled
+ORD-1003,cust_27,2023/04/09,-46.04,3,cancelled
+ORD-1004,cust_16,2023/04/09,free,3,cancelled
+ORD-1005,cust_14,Jan 5 2023,-22.75,5,shipped
+ORD-1006,cust_9,Jan 5 2023,113.19,5,cancelled
+ORD-1007,cust_24,03/02/2023,free,3,SHIPPED
+ORD-1008,cust_34,,263.77,2,cancelled
+ORD-1009,cust_33,Jan 5 2023,free,5,SHIPPED
+ORD-1010,cust_20,03/02/2023,127.68,1,cancelled
+ORD-1011,cust_32,03/02/2023,270.8,1,Delivered
+ORD-1012,cust_16,2023-01-15,251.16,1,cancelled
+ORD-1013,cust_36,03/02/2023,210.98,1,shipped
+ORD-1014,cust_17,2023-01-15,free,5,SHIPPED
+ORD-1015,cust_17,Jan 5 2023,-10.05,2,cancelled
+ORD-1016,cust_16,,free,two,  delivered
+ORD-1017,cust_2,,free,2,shipped
+ORD-1018,cust_28,Jan 5 2023,-34.12,3,unknown
+ORD-1019,cust_26,03/02/2023,free,2,unknown
+ORD-1020,cust_13,2023-01-15,-38.26,3,cancelled
+ORD-1021,cust_40,03/02/2023,free,two,shipped
+ORD-1022,cust_10,,101.78,two,Delivered
+ORD-1023,cust_4,2023-01-15,114.35,2,unknown
+ORD-1024,cust_11,Jan 5 2023,230.32,3,shipped
+ORD-1025,cust_25,03/02/2023,100.9,3,  delivered
+ORD-1026,cust_27,2023/04/09,226.79,1,  delivered
+ORD-1027,cust_6,,free,1,cancelled
+ORD-1028,cust_31,Jan 5 2023,free,1,  delivered
+ORD-1029,cust_30,Jan 5 2023,133.34,1,shipped
+ORD-1030,cust_18,2023-01-15,free,3,  delivered
+ORD-1031,cust_1,,free,5,  delivered
+ORD-1032,cust_17,2023-01-15,153.05,two,cancelled
+ORD-1033,cust_10,Jan 5 2023,free,5,unknown
+ORD-1034,cust_13,03/02/2023,170.62,two,Delivered
+ORD-1035,cust_28,03/02/2023,free,1,SHIPPED
+ORD-1036,cust_29,2023-01-15,47.0,2,unknown
+ORD-1037,cust_35,03/02/2023,-25.74,1,unknown
+ORD-1038,cust_29,2023/04/09,free,2,SHIPPED
+ORD-1039,cust_5,03/02/2023,-11.9,two,  delivered
+ORD-1040,cust_30,2023/04/09,496.3,1,unknown
+ORD-1041,cust_3,2023-01-15,84.71,3,  delivered
+ORD-1042,cust_24,03/02/2023,-13.53,5,shipped
+ORD-1043,cust_39,03/02/2023,230.07,5,shipped
+ORD-1044,cust_3,2023/04/09,-21.59,5,  delivered
+ORD-1045,cust_40,03/02/2023,free,3,SHIPPED
+ORD-1046,cust_7,2023-01-15,109.67,two,cancelled
+ORD-1047,cust_18,,202.86,two,unknown
+ORD-1048,cust_27,2023/04/09,free,1,cancelled
+ORD-1049,cust_11,2023/04/09,325.79,two,cancelled
+ORD-1050,cust_9,2023-01-15,267.19,1,SHIPPED
+ORD-1051,cust_40,2023-01-15,280.26,3,Delivered
+ORD-1052,cust_7,,-20.66,two,shipped
+ORD-1053,cust_3,Jan 5 2023,free,two,SHIPPED
+ORD-1054,cust_15,2023/04/09,-46.68,5,unknown
+ORD-1055,cust_26,Jan 5 2023,-13.83,5,shipped
+ORD-1056,cust_36,03/02/2023,-10.54,1,shipped
+ORD-1057,cust_27,2023/04/09,free,3,unknown
+ORD-1058,cust_2,,122.89,1,SHIPPED
+ORD-1059,cust_31,,145.11,two,SHIPPED
+ORD-1060,cust_33,2023-01-15,122.29,1,Delivered
+ORD-1061,cust_33,2023-01-15,321.85,two,shipped
+ORD-1062,cust_9,03/02/2023,22.67,two,SHIPPED
+ORD-1063,cust_23,2023/04/09,-46.22,5,shipped
+ORD-1064,cust_17,2023/04/09,97.0,5,SHIPPED
+ORD-1065,cust_3,Jan 5 2023,free,2,  delivered
+ORD-1066,cust_11,03/02/2023,free,3,cancelled
+ORD-1067,cust_34,2023-01-15,260.32,5,Delivered
+ORD-1068,cust_25,2023-01-15,free,3,  delivered
+ORD-1069,cust_40,,-19.89,1,SHIPPED
+ORD-1070,cust_1,2023/04/09,free,1,unknown
+ORD-1071,cust_9,03/02/2023,free,two,shipped
+ORD-1072,cust_7,03/02/2023,free,5,  delivered
+ORD-1073,cust_24,2023/04/09,-23.6,5,SHIPPED
+ORD-1074,cust_7,Jan 5 2023,-5.64,1,cancelled
+ORD-1075,cust_4,03/02/2023,free,5,shipped
+ORD-1076,cust_11,2023/04/09,188.53,1,SHIPPED
+ORD-1077,cust_7,2023-01-15,-6.14,1,shipped
+ORD-1078,cust_39,,-47.34,5,Delivered
+ORD-1079,cust_4,Jan 5 2023,free,two,unknown
+ORD-1009,cust_33,Jan 5 2023,free,5,SHIPPED
+ORD-1019,cust_26,03/02/2023,free,2,unknown

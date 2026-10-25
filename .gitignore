@@ -8,6 +8,7 @@ yarn-error.log*
 
 .env
 .env.*
+!.env.example
 *.env
 
 node_modules/
@@ -37,8 +38,9 @@ env/
 # Jupyter Notebook
 .ipynb_checkpoints/
 
-data/
+data/raw/
 *.csv
+!data/samples/*.csv
 *.json
 *.pkl
 *.h5
