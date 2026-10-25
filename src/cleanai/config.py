@@ -20,14 +20,14 @@ class Settings(BaseSettings):
     )
 
     groq_api_key: str = ""
-    groq_model_name: str = "llama-3.3-70b-versatile"
+    groq_model_name: str = "openai/gpt-oss-120b"
     llm_temperature: float = 0.0
 
     # where run history, case memory and user accounts live
     data_dir: Path = PROJECT_ROOT / "storage"
 
     # agent loop guardrails
-    max_tool_rounds: int = 12
+    max_tool_rounds: int = 20
     max_validation_rounds: int = 5
     max_step_attempts: int = 3
     max_stagnation_rounds: int = 2
