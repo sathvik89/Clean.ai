@@ -14,8 +14,8 @@ from langgraph.checkpoint.serde.base import SerializerProtocol
 from langgraph.graph import END, StateGraph
 
 from cleanai.agents.nodes import (
-    analyzer_node, executor_node, human_review_node,
-    planner_node, tool_handler_node, validator_node,
+    analyzer_node, eda_node, executor_node, human_review_node,
+    tool_handler_node, validator_node,
 )
 from cleanai.agents.state import AgentState
 from cleanai.config import get_settings
@@ -64,15 +64,15 @@ def route_after_validator(state: AgentState) -> str:
 def build_graph(checkpointer=None, with_human_review: bool = True):
     workflow = StateGraph(AgentState)
     workflow.add_node("analyzer", analyzer_node)
-    workflow.add_node("planner", planner_node)
+    workflow.add_node("eda", eda_node)
     workflow.add_node("human_review", human_review_node)
     workflow.add_node("executor", executor_node)
     workflow.add_node("tools", tool_handler_node)
     workflow.add_node("validator", validator_node)
 
     workflow.set_entry_point("analyzer")
-    workflow.add_edge("analyzer", "planner")
-    workflow.add_edge("planner", "human_review")
+    workflow.add_edge("analyzer", "eda")
+    workflow.add_edge("eda", "human_review")
     workflow.add_edge("human_review", "executor")
     workflow.add_conditional_edges("executor", route_after_executor)
     workflow.add_conditional_edges("tools", route_after_tools)

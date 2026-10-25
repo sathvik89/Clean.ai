@@ -20,8 +20,7 @@ from cleanai.agents.llm import build_llm, invoke_with_retry, usage_tokens
 from cleanai.agents.state import AgentState
 from cleanai.agents.tools import registry
 from cleanai.config import get_settings
-from cleanai.core import plan as planning
-from cleanai.core import profiling
+from cleanai.core import eda, plan as planning, profiling, suggest
 from cleanai.core.memory import (
     ActionRecord, CaseMemory, dataset_fingerprint, render_cards, render_ledger,
 )
@@ -44,7 +43,7 @@ def analyzer_node(state: AgentState) -> Dict[str, Any]:
     df = state["current_df"]
     log_line("analyzer", f"profiling {state['file_name']} shape={df.shape}")
     cards = profiling.build_cards(df)
-    profile_text = profiling.summarize_for_llm(df, cards)
+    bundle = eda.compute_bundle(df, cards)
 
     hints = ""
     try:
@@ -52,103 +51,116 @@ def analyzer_node(state: AgentState) -> Dict[str, Any]:
     except Exception as exc:
         log_line("analyzer", f"case memory unavailable: {exc}")
 
-    prompt = prompts.ANALYZER_PROMPT.format(
-        user_context=state["user_context"], profile=profile_text,
-    )
-    response = invoke_with_retry(
-        build_llm(),
-        [SystemMessage(content=prompts.SYSTEM_PROMPT), HumanMessage(content=prompt)],
-    )
-    log_line("analyzer", "analysis report ready")
+    issues = profiling.all_open_issues(df, cards)
+    log_line("analyzer", f"profile ready, {len(issues)} issues detected")
     return {
-        "tokens_used": usage_tokens(response),
         "cards": cards,
-        "analysis_report": response.content,
+        "eda_bundle": bundle,
         "case_hints": hints,
-        "logs": ["analysis complete: " + f"{len(profiling.all_open_issues(df, cards))} issues found"],
+        "logs": [f"profiled the data: {len(issues)} issues detected"],
         "run_error": "",
     }
 
 
 # ---------------------------------------------------------------------------
-# planner
+# eda agent
 # ---------------------------------------------------------------------------
 
-def fallback_plan(df, cards) -> List[planning.PlanStep]:
-    """Deterministic plan used when the LLM's JSON cannot be parsed."""
-    steps: List[planning.PlanStep] = []
-    type_map = {}
-    for card in cards:
-        kinds = {i.kind for i in card.issues_open}
-        if "wrong_dtype" in kinds or "non_numeric_values" in kinds:
-            type_map[card.name] = "float" if card.role == "numeric" else card.role
-        elif "invalid_dates" in kinds:
-            type_map[card.name] = "datetime"
-    if type_map:
-        steps.append(planning.PlanStep(
-            id="s1", tool="convert_types", params={"column_type_map": type_map},
-            rationale="fix wrong dtypes first", priority=1,
-        ))
-    if int(df.duplicated().sum()) > 0:
-        steps.append(planning.PlanStep(
-            id="s2", tool="remove_duplicates", rationale="drop exact duplicate rows", priority=1,
-        ))
-    null_cols = [c.name for c in cards if c.null_count > 0]
-    if null_cols:
-        steps.append(planning.PlanStep(
-            id="s3", tool="handle_missing", columns=null_cols,
-            params={"strategy": "auto"}, rationale="fill remaining nulls", priority=2,
-        ))
-    text_cols = [c.name for c in cards if c.role in ("text", "categorical")]
-    if text_cols:
-        steps.append(planning.PlanStep(
-            id="s4", tool="clean_text", columns=text_cols,
-            params={"actions": ["strip", "collapse_spaces"]},
-            rationale="standardize text", priority=3,
-        ))
-    for index, step in enumerate(steps):
-        step.id = f"s{index + 1}"
-    return steps
-
-
-def planner_node(state: AgentState) -> Dict[str, Any]:
-    log_line("planner", "building structured plan")
+def eda_node(state: AgentState) -> Dict[str, Any]:
+    """Agent-driven exploration: investigate with read-only tools, then
+    produce a narrative report plus cleaning suggestions."""
+    settings = get_settings()
     df = state["current_df"]
     cards = state["cards"]
-    hints_block = f"\nPAST-RUN HINTS:\n{state['case_hints']}" if state.get("case_hints") else ""
-    prompt = prompts.PLANNER_PROMPT.format(
+    profile_text = profiling.summarize_for_llm(df, cards)
+    eda_summary = eda.render_for_llm(state["eda_bundle"])
+    tokens = 0
+
+    # phase 1: free investigation with inspection tools (max 3 rounds)
+    log_line("eda", "agent is exploring the data")
+    inspect_tools = registry.langchain_tools(registry.INSPECTION_TOOLS)
+    llm = build_llm().bind_tools(inspect_tools)
+    messages = [
+        SystemMessage(content=prompts.SYSTEM_PROMPT),
+        HumanMessage(content=prompts.EDA_INVESTIGATE_PROMPT.format(
+            profile=profile_text, eda_summary=eda_summary)),
+    ]
+    investigation_notes = []
+    final_note = ""
+    for round_number in range(3):
+        response = invoke_with_retry(llm, messages)
+        tokens += usage_tokens(response)
+        calls = getattr(response, "tool_calls", None) or []
+        if not calls:
+            final_note = str(response.content)
+            break
+        messages.append(response)
+        log_line("eda", f"investigation round {round_number + 1}: {len(calls)} lookups")
+        for call in calls:
+            name = registry.normalize_tool_name(call["name"])
+            if name not in registry.INSPECTION_TOOLS:
+                result_text = f"error: {name} is not available during exploration"
+            else:
+                result_text = registry.execute(name, df, call.get("args") or {}).message
+            clipped = result_text[: settings.tool_output_max_chars // 2]
+            investigation_notes.append(f"{name}({json.dumps(call.get('args') or {}, default=str)[:80]}):\n{clipped}")
+            messages.append(ToolMessage(tool_call_id=call["id"], content=clipped))
+
+    investigation = final_note or "(no extra notes)"
+    if investigation_notes:
+        investigation += "\n\nlookups made:\n" + "\n".join(n[:400] for n in investigation_notes[-6:])
+
+    # phase 2: structured report + suggestions
+    log_line("eda", "writing the eda report and suggestions")
+    hints_block = f"\nHINTS FROM SIMILAR PAST RUNS:\n{state['case_hints']}" if state.get("case_hints") else ""
+    report_prompt = prompts.EDA_REPORT_PROMPT.format(
         tool_signatures=registry.tool_signatures(),
-        user_context=state["user_context"],
-        analysis_report=state["analysis_report"],
-        profile=profiling.summarize_for_llm(df, cards),
+        user_context=state.get("user_context", ""),
+        profile=profile_text,
+        eda_summary=eda_summary,
+        investigation=investigation[:3000],
         case_hints=hints_block,
     )
     response = invoke_with_retry(
         build_llm(json_mode=True),
-        [SystemMessage(content=prompts.SYSTEM_PROMPT), HumanMessage(content=prompt)],
+        [SystemMessage(content=prompts.SYSTEM_PROMPT), HumanMessage(content=report_prompt)],
     )
-    steps = planning.parse_plan(
+    tokens += usage_tokens(response)
+
+    payload = planning._extract_json(response.content) or {}
+    narrative_md = suggest.narrative_to_markdown(payload.get("narrative"))
+    suggestions = suggest.parse_suggestions(
         response.content,
         valid_tools=list(registry.REGISTRY.keys()),
         valid_columns=[str(c) for c in df.columns],
     )
     source = "llm"
-    if not steps:
-        steps = fallback_plan(df, cards)
+    if not suggestions:
+        suggestions = suggest.fallback_suggestions(df, cards)
         source = "fallback"
-        log_line("planner", "llm plan unusable, using deterministic fallback")
-    log_line("planner", f"plan ready with {len(steps)} steps ({source})")
+        log_line("eda", "model suggestions unusable, using deterministic fallback")
+    if not narrative_md:
+        narrative_md = "The automated profile below describes the dataset; the model's narrative was unavailable."
+    log_line("eda", f"report ready with {len(suggestions)} suggestions ({source})")
+
     return {
-        "tokens_used": usage_tokens(response),
-        "plan_steps": planning.steps_to_dicts(steps),
-        "current_step_index": 0,
-        "mode": "plan",
-        "logs": [f"cleaning plan ready: {len(steps)} steps"],
+        "tokens_used": tokens,
+        "analysis_report": narrative_md,
+        "suggestions": [s.model_dump() for s in suggestions],
+        "logs": [f"eda complete: report written, {len(suggestions)} cleaning suggestions proposed"],
     }
 
 
 def human_review_node(state: AgentState) -> Dict[str, Any]:
-    return {"logs": ["awaiting human approval of the plan"]}
+    if state.get("plan_locked") or state.get("plan_steps"):
+        return {"logs": ["plan approved, starting execution"]}
+    # headless runs (cli --yes, tests) compile the plan from all suggestions
+    plan = suggest.build_plan(state.get("suggestions", []))
+    return {
+        "plan_steps": plan,
+        "current_step_index": 0,
+        "logs": [f"plan compiled from {len(plan)} accepted suggestions"],
+    }
 
 
 # ---------------------------------------------------------------------------

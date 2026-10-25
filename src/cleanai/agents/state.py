@@ -33,8 +33,11 @@ class AgentState(TypedDict):
     cards: List[ColumnCard]
 
     # agent outputs
+    eda_bundle: Dict[str, Any]
     analysis_report: str
+    suggestions: List[Dict[str, Any]]
     plan_steps: List[Dict[str, Any]]
+    plan_locked: bool
     current_step_index: int
     mode: str                      # "plan" | "repair"
     case_hints: str
@@ -66,8 +69,11 @@ def initial_state(df: pd.DataFrame, file_name: str, user_context: str) -> AgentS
         original_df=df.copy(),
         current_df=df.copy(),
         cards=[],
+        eda_bundle={},
         analysis_report="",
+        suggestions=[],
         plan_steps=[],
+        plan_locked=False,
         current_step_index=0,
         mode="plan",
         case_hints="",

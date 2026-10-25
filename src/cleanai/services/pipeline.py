@@ -28,6 +28,11 @@ TOOL_ISSUE_MAP = {
     "fix_outliers": {"out_of_range", "negative_values"},
     "clean_text": {"mixed_types"},
     "run_pandas": {"out_of_range", "negative_values", "invalid_email", "future_dates"},
+    "extract_numbers": {"non_numeric_values", "wrong_dtype", "mixed_types"},
+    "parse_dates": {"invalid_dates", "wrong_dtype", "future_dates"},
+    "standardize_categories": {"mixed_types"},
+    "impute_group": {"missing_values"},
+    "replace_values": {"out_of_range", "negative_values", "non_numeric_values"},
 }
 
 ProgressCallback = Callable[[str, Dict[str, Any]], None]
@@ -95,43 +100,6 @@ def apply_recorded_actions(df: pd.DataFrame, actions: List[Dict[str, Any]]) -> D
     }
 
 
-def revise_plan_with_chat(
-    steps: List[Dict[str, Any]],
-    instruction: str,
-    df: pd.DataFrame,
-    api_key: Optional[str] = None,
-) -> List[Dict[str, Any]]:
-    """Let the user edit the plan in natural language; returns new steps
-    (or the original plan unchanged if the model's output is unusable)."""
-    import json as json_module
-
-    from langchain_core.messages import HumanMessage, SystemMessage
-
-    from cleanai.agents.llm import build_llm, invoke_with_retry
-    from cleanai.agents.prompts import SYSTEM_PROMPT
-    from cleanai.agents.tools import registry
-    from cleanai.core import plan as planning
-
-    prompt = (
-        "Here is the current cleaning plan as JSON:\n"
-        f"{json_module.dumps({'steps': steps}, default=str)}\n\n"
-        f"Available tools:\n{registry.tool_signatures()}\n\n"
-        f"The user wants this change: {instruction}\n\n"
-        "Return the FULL revised plan as JSON with the same schema "
-        '({"steps": [...]}). Keep unrelated steps unchanged. JSON only.'
-    )
-    response = invoke_with_retry(
-        build_llm(json_mode=True, api_key=api_key),
-        [SystemMessage(content=SYSTEM_PROMPT), HumanMessage(content=prompt)],
-    )
-    revised = planning.parse_plan(
-        response.content,
-        valid_tools=list(registry.REGISTRY.keys()),
-        valid_columns=[str(c) for c in df.columns],
-    )
-    return planning.steps_to_dicts(revised) if revised else steps
-
-
 class CleaningSession:
     def __init__(self, df: pd.DataFrame, file_name: str, user_context: str):
         self.app = build_graph()
@@ -153,13 +121,71 @@ class CleaningSession:
                 if on_event:
                     on_event(node_name, output or {})
 
-    # ---- plan inspection / editing ----
+    # ---- review phase: suggestions in, plan out ----
     def state_values(self) -> Dict[str, Any]:
         return self.app.get_state(self.config).values
 
     def awaiting_review(self) -> bool:
         return bool(self.app.get_state(self.config).next)
 
+    def get_suggestions(self) -> List[Dict[str, Any]]:
+        return list(self.state_values().get("suggestions", []))
+
+    def set_suggestions(self, suggestions: List[Dict[str, Any]]) -> None:
+        from cleanai.core import suggest
+
+        self.app.update_state(self.config, {"suggestions": suggest.reindex(suggestions)})
+
+    def add_user_request(self, request: str, api_key: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Turn a free-text user ask into suggestions and append them."""
+        import json as json_module
+
+        from langchain_core.messages import HumanMessage, SystemMessage
+
+        from cleanai.agents.llm import build_llm, invoke_with_retry
+        from cleanai.agents.prompts import SYSTEM_PROMPT
+        from cleanai.agents.tools import registry
+        from cleanai.core import suggest
+
+        df = self.state_values()["current_df"]
+        existing = self.get_suggestions()
+        prompt = (
+            "The user wants to add to the cleaning work. Convert their request into "
+            'suggestions as JSON: {"suggestions": [{"title", "why", "severity", '
+            '"tool", "columns", "params"}]}. Use only these tools:\n'
+            f"{registry.tool_signatures()}\n\n"
+            f"Columns available: {[str(c) for c in df.columns]}\n"
+            f"Already planned (do not duplicate): "
+            f"{json_module.dumps([{'tool': s['tool'], 'columns': s['columns']} for s in existing], default=str)}\n\n"
+            f"User request: {request}\n\nJSON only."
+        )
+        response = invoke_with_retry(
+            build_llm(json_mode=True, api_key=api_key),
+            [SystemMessage(content=SYSTEM_PROMPT), HumanMessage(content=prompt)],
+        )
+        new_items = suggest.parse_suggestions(
+            response.content,
+            valid_tools=list(registry.REGISTRY.keys()),
+            valid_columns=[str(c) for c in df.columns],
+            source="user",
+        )
+        combined = existing + [s.model_dump() for s in new_items]
+        self.set_suggestions(combined)
+        return [s.model_dump() for s in new_items]
+
+    def approve(self, goal: str = "") -> List[Dict[str, Any]]:
+        """Compile accepted suggestions into the plan and lock it in."""
+        from cleanai.core import suggest
+
+        plan = suggest.build_plan(self.get_suggestions())
+        updates = {"plan_steps": plan, "plan_locked": True, "current_step_index": 0, "mode": "plan"}
+        if goal.strip():
+            updates["user_context"] = goal.strip()
+            self.user_context = goal.strip()
+        self.app.update_state(self.config, updates)
+        return plan
+
+    # legacy accessors still used by the advanced editor
     def get_plan(self) -> List[Dict[str, Any]]:
         return list(self.state_values().get("plan_steps", []))
 
