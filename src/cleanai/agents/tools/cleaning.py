@@ -194,6 +194,106 @@ def clip_outliers(df: pd.DataFrame, columns: List[str], method: str = "clip") ->
     return out
 
 
+def extract_numbers(df: pd.DataFrame, columns: List[str]) -> pd.DataFrame:
+    """Pull numbers out of text like '₹55,000', '55000 INR', '$1.2k'."""
+    out = df.copy()
+    for col in columns:
+        if col not in out.columns:
+            continue
+        text = out[col].astype(str).str.replace(",", "", regex=False)
+        text = text.str.extract(r"(-?\d+\.?\d*)", expand=False)
+        multiplier = out[col].astype(str).str.lower().str.contains("k", na=False)
+        numeric = pd.to_numeric(text, errors="coerce")
+        numeric = numeric.where(~multiplier, numeric * 1000)
+        out[col] = numeric.where(out[col].notna(), other=pd.NA)
+    return out
+
+
+def parse_dates(df: pd.DataFrame, columns: List[str], dayfirst: bool = False) -> pd.DataFrame:
+    out = df.copy()
+    for col in columns:
+        if col not in out.columns:
+            continue
+        out[col] = pd.to_datetime(
+            out[col].astype(str).where(out[col].notna()),
+            errors="coerce", dayfirst=dayfirst, format="mixed",
+        )
+    return out
+
+
+def standardize_categories(df: pd.DataFrame, columns: List[str]) -> pd.DataFrame:
+    """Merge category variants that differ only by case/whitespace/close
+    spelling ('Pune', ' pune ', 'PUNE' -> one label)."""
+    import difflib
+
+    out = df.copy()
+    for col in columns:
+        if col not in out.columns:
+            continue
+        mask = out[col].notna()
+        raw = out.loc[mask, col].astype(str)
+        normalized = raw.str.strip().str.lower().str.replace(r"\s+", " ", regex=True)
+
+        # canonical label per normalized group = its most common raw spelling, cleaned
+        canonical: Dict[str, str] = {}
+        for norm, group in raw.groupby(normalized):
+            canonical[norm] = group.mode().iloc[0].strip()
+
+        # fuzzy-merge near-identical normalized keys into the more common one
+        keys = sorted(canonical, key=lambda k: -int((normalized == k).sum()))
+        merged: Dict[str, str] = {}
+        for key in keys:
+            match = difflib.get_close_matches(key, list(merged), n=1, cutoff=0.87)
+            merged[key] = merged[match[0]] if match else canonical[key]
+
+        out.loc[mask, col] = normalized.map(merged)
+    return out
+
+
+def impute_group(df: pd.DataFrame, column: str, by: str, strategy: str = "median") -> pd.DataFrame:
+    """Fill missing values using per-group statistics (e.g. median salary by
+    department), falling back to the overall statistic."""
+    out = df.copy()
+    if column not in out.columns or by not in out.columns:
+        return out
+    numeric = pd.to_numeric(out[column], errors="coerce")
+    if strategy == "mode":
+        fill = out.groupby(by)[column].transform(
+            lambda s: s.mode().iloc[0] if not s.mode().empty else pd.NA)
+        out[column] = out[column].fillna(fill)
+        modes = out[column].mode()
+        if not modes.empty:
+            out[column] = out[column].fillna(modes.iloc[0])
+        return out
+    grouped = numeric.groupby(out[by]).transform("mean" if strategy == "mean" else "median")
+    overall = numeric.mean() if strategy == "mean" else numeric.median()
+    out[column] = numeric.fillna(grouped).fillna(overall)
+    return out
+
+
+def replace_values(df: pd.DataFrame, column: str, mapping: Dict[str, Any]) -> pd.DataFrame:
+    out = df.copy()
+    if column in out.columns:
+        out[column] = out[column].replace(mapping)
+    return out
+
+
+def flag_rows(df: pd.DataFrame, flag_name: str, condition_code: str) -> pd.DataFrame:
+    """Add a boolean flag column instead of deleting rows. The snippet must
+    assign a boolean Series to `mask` (it runs in the sandbox)."""
+    from cleanai.agents.tools import sandbox
+
+    sandbox.validate_code(condition_code)
+    scope = {"df": df.copy(), "pd": pd, "np": __import__("numpy")}
+    exec(compile(condition_code, "<flag>", "exec"), {"__builtins__": sandbox.SAFE_BUILTINS}, scope)
+    mask = scope.get("mask")
+    if mask is None:
+        raise ValueError("snippet must assign a boolean Series to a variable named 'mask'")
+    out = df.copy()
+    out[flag_name] = pd.Series(mask, index=out.index).fillna(False).astype(bool)
+    return out
+
+
 def rename_columns(df: pd.DataFrame, rename_map: Dict[str, str]) -> pd.DataFrame:
     valid = {old: new for old, new in rename_map.items() if old in df.columns}
     return df.rename(columns=valid).copy()

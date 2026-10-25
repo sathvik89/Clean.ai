@@ -106,6 +106,48 @@ class ReportBlockedArgs(BaseModel):
     reason: str = Field(description="why the current step cannot be completed")
 
 
+class ExtractNumbersArgs(BaseModel):
+    columns: List[str] = Field(description="text columns holding numbers with currency symbols, commas or units")
+
+
+class ParseDatesArgs(BaseModel):
+    columns: List[str] = Field(description="columns holding dates in mixed or messy formats")
+    dayfirst: bool = Field(default=False, description="true if dates are day-first like 15/06/2020")
+
+
+class ImputeGroupArgs(BaseModel):
+    column: str = Field(description="column whose missing values to fill")
+    by: str = Field(description="grouping column, e.g. fill salary by department")
+    strategy: str = Field(default="median", description="median, mean or mode")
+
+
+class ReplaceValuesArgs(BaseModel):
+    column: str = Field(description="column to fix")
+    mapping: Dict[str, Any] = Field(description="old value -> new value, e.g. {\"ten\": 10}")
+
+
+class FlagRowsArgs(BaseModel):
+    flag_name: str = Field(description="name of the new boolean column")
+    condition_code: str = Field(description="pandas snippet assigning a boolean Series to `mask`, e.g. mask = df['age'] > 120")
+
+
+class ValueCountsArgs(BaseModel):
+    column: str = Field(description="column to inspect")
+    top_k: int = Field(default=10, description="how many of the most frequent values to show")
+
+
+class DescribeArgs(BaseModel):
+    columns: Optional[List[str]] = Field(default=None, description="numeric columns; omit for all numeric")
+
+
+class CorrelationArgs(BaseModel):
+    threshold: float = Field(default=0.4, description="minimum absolute correlation to report")
+
+
+class SampleRowsArgs(BaseModel):
+    n: int = Field(default=5, description="how many rows to sample (max 10)")
+
+
 # ---------------------------------------------------------------------------
 # tool handlers
 # ---------------------------------------------------------------------------
@@ -186,13 +228,103 @@ def _report_blocked(df: pd.DataFrame, reason: str) -> ToolResult:
     return ToolResult(message=f"step marked blocked: {reason}", status="blocked")
 
 
+@register("extract_numbers", "Pull real numbers out of text like '55,000 INR' or '$1.2k'; non-numbers become missing.", ExtractNumbersArgs, mutates=True)
+def _extract_numbers(df: pd.DataFrame, columns: List[str]) -> ToolResult:
+    return ToolResult(message=f"extracted numbers from {columns}", df=cleaning.extract_numbers(df, columns))
+
+
+@register("parse_dates", "Parse messy or mixed-format date columns into real datetimes; unparseable values become missing.", ParseDatesArgs, mutates=True)
+def _parse_dates(df: pd.DataFrame, columns: List[str], dayfirst: bool = False) -> ToolResult:
+    return ToolResult(message=f"parsed dates in {columns}", df=cleaning.parse_dates(df, columns, dayfirst))
+
+
+@register("standardize_categories", "Merge category labels that differ only by case, spacing or tiny spelling differences.", ColumnsArgs, mutates=True)
+def _standardize_categories(df: pd.DataFrame, columns: List[str]) -> ToolResult:
+    return ToolResult(message=f"standardized categories in {columns}", df=cleaning.standardize_categories(df, columns))
+
+
+@register("impute_group", "Fill missing values using per-group statistics, e.g. median salary within each department.", ImputeGroupArgs, mutates=True)
+def _impute_group(df: pd.DataFrame, column: str, by: str, strategy: str = "median") -> ToolResult:
+    return ToolResult(message=f"imputed {column} by {by} ({strategy})", df=cleaning.impute_group(df, column, by, strategy))
+
+
+@register("replace_values", "Replace specific wrong values in a column using an explicit mapping.", ReplaceValuesArgs, mutates=True)
+def _replace_values(df: pd.DataFrame, column: str, mapping: Dict[str, Any]) -> ToolResult:
+    return ToolResult(message=f"replaced values in {column}", df=cleaning.replace_values(df, column, mapping))
+
+
+@register("flag_rows", "Mark suspicious rows with a boolean flag column instead of deleting them.", FlagRowsArgs, mutates=True)
+def _flag_rows(df: pd.DataFrame, flag_name: str, condition_code: str) -> ToolResult:
+    return ToolResult(message=f"flagged rows into {flag_name}", df=cleaning.flag_rows(df, flag_name, condition_code))
+
+
+# ---- read-only inspection tools (used heavily during EDA) ----
+
+@register("value_counts", "See the most frequent values in one column.", ValueCountsArgs, mutates=False)
+def _value_counts(df: pd.DataFrame, column: str, top_k: int = 10) -> ToolResult:
+    if column not in df.columns:
+        return ToolResult(message=f"error: no column named {column}", status="error")
+    counts = df[column].astype(str).where(df[column].notna()).value_counts(dropna=True).head(min(top_k, 25))
+    lines = [f"{profiling.mask_value(str(v))[:40]}: {int(c)}" for v, c in counts.items()]
+    nulls = int(df[column].isnull().sum())
+    return ToolResult(message=f"value counts for {column} (nulls={nulls}):\n" + "\n".join(lines))
+
+
+@register("describe", "Summary statistics for numeric columns.", DescribeArgs, mutates=False)
+def _describe(df: pd.DataFrame, columns=None) -> ToolResult:
+    import pandas as _pd
+
+    target = [c for c in (columns or df.columns) if c in df.columns]
+    numeric = {c: _pd.to_numeric(df[c], errors="coerce") for c in target}
+    numeric = {c: s for c, s in numeric.items() if s.notna().sum() > 0}
+    if not numeric:
+        return ToolResult(message="no numeric data in those columns")
+    lines = []
+    for col, series in list(numeric.items())[:12]:
+        lines.append(
+            f"{col}: mean={series.mean():.2f} median={series.median():.2f} "
+            f"min={series.min():.2f} max={series.max():.2f} std={series.std():.2f}"
+        )
+    return ToolResult(message="\n".join(lines))
+
+
+@register("correlation_pairs", "Find strongly correlated numeric column pairs.", CorrelationArgs, mutates=False)
+def _correlation_pairs(df: pd.DataFrame, threshold: float = 0.4) -> ToolResult:
+    import pandas as _pd
+
+    numeric = df.apply(lambda s: _pd.to_numeric(s, errors="coerce"))
+    numeric = numeric.loc[:, numeric.notna().sum() > 0]
+    if numeric.shape[1] < 2:
+        return ToolResult(message="fewer than two numeric columns, no correlations")
+    corr = numeric.corr()
+    pairs = []
+    cols = list(corr.columns)
+    for i, a in enumerate(cols):
+        for j in range(i + 1, len(cols)):
+            r = corr.iloc[i, j]
+            if _pd.notna(r) and abs(r) >= threshold:
+                pairs.append(f"{a} ~ {cols[j]}: r={r:.2f}")
+    return ToolResult(message="\n".join(pairs) if pairs else f"no pairs above |r|={threshold}")
+
+
+@register("sample_rows", "Look at a few sample rows (sensitive values are masked).", SampleRowsArgs, mutates=False)
+def _sample_rows(df: pd.DataFrame, n: int = 5) -> ToolResult:
+    sample = df.sample(min(max(n, 1), 10), random_state=3) if len(df) > 10 else df.head(10)
+    masked = sample.astype(str).map(lambda v: profiling.mask_value(v)[:28])
+    return ToolResult(message=masked.to_string(index=False))
+
+
+INSPECTION_TOOLS = ["get_summary", "value_counts", "describe", "correlation_pairs", "sample_rows", "detect_outliers"]
+
+
 # ---------------------------------------------------------------------------
 # registry API
 # ---------------------------------------------------------------------------
 
-def langchain_tools() -> List[StructuredTool]:
+def langchain_tools(names: Optional[List[str]] = None) -> List[StructuredTool]:
+    specs = [REGISTRY[n] for n in names if n in REGISTRY] if names else list(REGISTRY.values())
     tools = []
-    for spec in REGISTRY.values():
+    for spec in specs:
         tools.append(
             StructuredTool.from_function(
                 func=lambda **_: None,   # dispatch happens in execute(), not here
