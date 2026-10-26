@@ -92,6 +92,12 @@ def reindex(suggestions: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return suggestions
 
 
+# these tools legitimately create NEW missing values (coercions, nullify),
+# so a run containing them always ends with a catch-all fill
+NULL_REVEALING_TOOLS = {"normalize_nulls", "convert_types", "parse_dates",
+                        "extract_numbers", "fix_outliers"}
+
+
 def build_plan(suggestions: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Compile accepted suggestions into ordered plan steps."""
     accepted = [Suggestion(**s) for s in suggestions if s.get("accepted", True)]
@@ -105,6 +111,17 @@ def build_plan(suggestions: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             params=item.params,
             rationale=item.title[:140],
             priority=SEVERITY_RANK.get(item.severity, 1) + 1,
+        ))
+
+    reveals_nulls = any(s.tool in NULL_REVEALING_TOOLS for s in accepted)
+    has_catch_all = any(s.tool == "handle_missing" and not s.columns for s in accepted)
+    if accepted and reveals_nulls and not has_catch_all:
+        steps.append(PlanStep(
+            id=f"s{len(steps) + 1}",
+            tool="handle_missing",
+            params={"strategy": "auto"},
+            rationale="safety net: fill values the earlier fixes revealed as missing",
+            priority=3,
         ))
     return steps_to_dicts(steps)
 
@@ -175,6 +192,6 @@ def narrative_to_markdown(narrative: Any) -> str:
         if isinstance(items, str):
             items = [items]
         if items:
-            parts.append(f"**{heading}**")
-            parts.extend(f"- {str(item)}" for item in items[:8])
-    return "\n\n".join(parts[:2]) + ("\n" + "\n".join(parts[2:]) if len(parts) > 2 else "")
+            bullets = "\n".join(f"- {str(item)}" for item in items[:8])
+            parts.append(f"**{heading}**\n\n{bullets}")
+    return "\n\n".join(parts)

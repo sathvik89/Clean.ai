@@ -66,6 +66,10 @@ def handle_missing(
                 filled = numeric.interpolate(limit_direction="both")
                 out[col] = out[col].fillna(filled)
         elif resolved in ("mean", "median"):
+            if is_datetime64_any_dtype(out[col]):
+                # datetimes have a perfectly good median of their own
+                out[col] = out[col].fillna(out[col].median())
+                continue
             numeric = pd.to_numeric(out[col], errors="coerce")
             value = numeric.mean() if resolved == "mean" else numeric.median()
             if is_numeric_dtype(out[col]):

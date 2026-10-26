@@ -59,6 +59,9 @@ def simulate_plan(df: pd.DataFrame, steps: List[Dict[str, Any]]) -> List[Dict[st
             delta = profiling.metrics_delta(before, after)
             impact["effect"] = profiling.render_delta(delta)
             working = result.df
+        elif result.status == "error" and "bad arguments" in result.message and not step.get("params"):
+            impact["ok"] = True
+            impact["effect"] = "the agent will fill in this tool's parameters at runtime"
         elif result.status == "error":
             impact["effect"] = result.message[:160]
         else:

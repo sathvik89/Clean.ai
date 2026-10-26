@@ -26,9 +26,11 @@ Built on LangGraph + Groq, with a Streamlit front end.
    drop rows") — they become first-class suggestions too. Accepted suggestions
    compile deterministically into an ordered plan: structure fixes before value
    fixes before cosmetics.
-4. **Execute** — the agent works the plan step by step with its 23-tool kit,
-   streaming a live timeline. Every action lands in a ledger with its measured
-   effect.
+4. **Execute** — approved steps with complete parameters run *mechanically*
+   through the tool registry (no model, no drift, no tokens); the agent is
+   consulted only for steps that still need judgment — e.g. writing the boolean
+   condition for `flag_rows` — and for the repair phase. Every action lands in a
+   ledger with its measured effect, streamed as a live timeline.
 5. **Validate & repair** — a deterministic validator re-profiles the result; if
    issues remain, the agent enters a repair loop focused on exactly those issues.
 6. **Deliver** — quality scores before/after (overall + four dimensions),
@@ -44,11 +46,11 @@ Numbers from live runs against Groq `openai/gpt-oss-120b` (see
 
 | benchmark | result |
 |---|---|
-| 153,000-row messy dataset | quality **22 → 100**, 38,373 missing cells fixed, status *clean* |
-| wall time for that run | **102 s** end to end |
-| LLM cost at 153k rows | **~26k tokens** — same order as an 8-row file, because the model only ever sees compact profiles, never the data |
-| 8-row seeded-chaos dataset | quality **15 → 100**, status *clean* |
-| automated tests | **75 passing**, including scripted-LLM full-graph integration tests |
+| 153,000-row messy dataset | quality **22 → 92**, all **38,373** missing cells fixed, 3,000 duplicate rows removed |
+| wall time for that run | **63 s** end to end |
+| LLM cost at 153k rows | **~12k tokens** — same order as an 8-row file, because approved steps execute mechanically and the model only ever sees compact profiles, never the data |
+| 8-row seeded-chaos torture file | quality **15 → 79** with rows *preserved* — bad values are flagged or repaired, not deleted, and the run stops honestly when the rest is unfixable |
+| automated tests | **78 passing**, including scripted-LLM full-graph integration tests |
 | agent toolkit | **23 tools** (17 cleaning + 6 read-only inspection) |
 
 Dataset size is bounded by your machine's RAM, not by the model: profiling

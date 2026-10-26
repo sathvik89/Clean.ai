@@ -164,6 +164,80 @@ def human_review_node(state: AgentState) -> Dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# mechanical executor: approved steps with complete params never need the LLM
+# ---------------------------------------------------------------------------
+
+def step_args(step: Dict[str, Any]) -> Dict[str, Any]:
+    args = dict(step.get("params") or {})
+    if step.get("columns"):
+        args.setdefault("columns", step["columns"])
+    return args
+
+
+def step_fully_specified(step: Dict[str, Any]) -> bool:
+    spec = registry.REGISTRY.get(step.get("tool", ""))
+    if spec is None:
+        return False
+    try:
+        spec.args_model(**step_args(step))
+        return True
+    except Exception:
+        return False
+
+
+def mech_node(state: AgentState) -> Dict[str, Any]:
+    """Execute the current plan step exactly as approved - no model, no drift."""
+    settings = get_settings()
+    df = state["current_df"]
+    steps = [dict(s) for s in state["plan_steps"]]
+    index = state["current_step_index"]
+    step = steps[index]
+    args = step_args(step)
+    log_line("mech", f"running approved step {step['id']} {step['tool']}")
+
+    before = profiling.snapshot(df)
+    result = registry.execute(step["tool"], df, args)
+    delta_text = ""
+    status = result.status
+    if result.mutated and status == "ok":
+        after = profiling.snapshot(result.df)
+        original_rows = len(state["original_df"])
+        min_allowed_rows = original_rows * (1 - settings.max_row_drop_pct / 100.0)
+        if after["rows"] < min_allowed_rows:
+            status = "error"
+            result.message = (
+                f"guardrail: refused - would exceed the {settings.max_row_drop_pct:.0f}% "
+                "row-deletion budget for the run"
+            )
+        else:
+            delta = profiling.metrics_delta(before, after)
+            delta_text = profiling.render_delta(delta)
+            if delta:
+                df = result.df
+            else:
+                status = "noop"
+
+    step["status"] = "done" if status in ("ok", "noop") else "blocked"
+    step["result"] = (delta_text or result.message)[:140]
+    record = ActionRecord(
+        seq=len(state["ledger"]) + 1, tool=step["tool"], args=args,
+        status="ok" if status in ("ok", "noop") else "error",
+        delta=delta_text,
+        error=result.message if status == "error" else "",
+        df_signature=profiling.df_signature(df),
+    )
+    return {
+        "current_df": df,
+        "cards": profiling.refresh_cards(df, state["cards"]),
+        "plan_steps": steps,
+        "current_step_index": index + 1,
+        "ledger": [record.to_dict()],
+        "logs": [record.render()],
+        "tool_rounds": state["tool_rounds"] + 1,
+    }
+
+
+# ---------------------------------------------------------------------------
 # executor
 # ---------------------------------------------------------------------------
 

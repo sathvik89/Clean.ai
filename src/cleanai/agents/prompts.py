@@ -55,7 +55,10 @@ standardize_categories / impute_group over dropping rows or columns.
 4. For impossible values (negative salary, age > 120), prefer fix_outliers with \
 method=nullify, or flag_rows when deletion would lose information.
 5. params holds tool arguments other than columns, e.g. {{"strategy": "median"}} \
-or {{"column_type_map": {{"age": "float"}}}}.
+or {{"column_type_map": {{"age": "float"}}}}. Tools that need params MUST get \
+them: flag_rows needs {{"flag_name": ..., "condition_code": "mask = ..."}}, \
+impute_group needs {{"column": ..., "by": ...}}, replace_values needs \
+{{"column": ..., "mapping": {{...}}}}.
 6. 3 to 10 suggestions. Reference only real column names.
 7. Severity: high = corrupts analysis, medium = degrades quality, low = cosmetic.
 

@@ -66,3 +66,9 @@ def test_missing_columns_are_ignored():
     df = pd.DataFrame({"a": [1]})
     out = cleaning.drop_columns(df, ["ghost"])
     assert list(out.columns) == ["a"]
+
+
+def test_median_fill_works_on_datetimes():
+    df = pd.DataFrame({"joined": pd.to_datetime(["2021-01-01", None, "2023-01-01"])})
+    out = cleaning.handle_missing(df, "median", ["joined"])
+    assert out["joined"].isnull().sum() == 0

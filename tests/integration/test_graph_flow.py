@@ -41,16 +41,14 @@ def tool_call_message(name, args, call_id):
 
 
 def scripted_run_messages():
+    # every plan step is fully specified, so execution is mechanical:
+    # the model is only consulted during eda
     return [
         # eda investigation: one lookup, then a closing note
         tool_call_message("value_counts", {"column": "age"}, "i1"),
         AIMessage(content="age holds numeric text; city labels look fine."),
         # eda report with suggestions
         AIMessage(content=EDA_REPORT_JSON),
-        # executor works the compiled plan
-        tool_call_message("convert_types", {"column_type_map": {"age": "float"}}, "c1"),
-        tool_call_message("remove_duplicates", {}, "c2"),
-        tool_call_message("handle_missing", {"strategy": "median", "columns": ["age"]}, "c3"),
     ]
 
 
@@ -83,12 +81,12 @@ def test_full_run_cleans_the_data(scripted_graph, dirty_df):
     # eda produced a narrative and suggestions, which compiled into the plan
     assert "duplicate" in final["analysis_report"]
     assert len(final["suggestions"]) == 3
-    assert len(final["plan_steps"]) == 3
+    assert len(final["plan_steps"]) == 4   # 3 suggestions + safety-net fill
     # structure fix ordered before value fixes regardless of model order
     assert final["plan_steps"][0]["tool"] == "convert_types"
     assert all(step["status"] == "done" for step in final["plan_steps"])
-    assert len(final["ledger"]) == 3
-    assert all(record["status"] == "ok" for record in final["ledger"])
+    assert len(final["ledger"]) == 4
+    assert all(record["status"] in ("ok", "noop") for record in final["ledger"])
 
 
 def test_duplicate_calls_are_short_circuited(monkeypatch, isolated_storage):
@@ -97,9 +95,10 @@ def test_duplicate_calls_are_short_circuited(monkeypatch, isolated_storage):
     from cleanai.agents.state import initial_state
 
     clean_df = pd.DataFrame({"value": [1.0, 2.0, 3.0, 1000.0]})
+    # flag_rows without params is underspecified, so the LLM executor handles it
     report = json.dumps({"narrative": {"overview": "fine"}, "suggestions": [
-        {"title": "Inspect outliers", "severity": "low",
-         "tool": "detect_outliers", "columns": ["value"], "params": {}},
+        {"title": "Flag the outliers", "severity": "low",
+         "tool": "flag_rows", "columns": ["value"], "params": {}},
     ]})
     messages = [
         AIMessage(content="nothing surprising"),          # eda: no lookups
@@ -134,7 +133,8 @@ def test_row_drop_guardrail_blocks_mass_deletion(monkeypatch, isolated_storage):
     messages = [
         AIMessage(content="v is mostly missing"),
         AIMessage(content=report),
-        tool_call_message("handle_missing", {"strategy": "drop", "columns": ["v"]}, "c1"),
+        # the drop step runs mechanically and is refused; the model only
+        # appears in the repair phase, where it fills instead
         tool_call_message("handle_missing", {"strategy": "median", "columns": ["v"]}, "c2"),
     ]
     llm = make_scripted_llm(messages)
@@ -161,11 +161,8 @@ def test_unusable_report_falls_back_to_deterministic_suggestions(monkeypatch, is
     messages = [
         AIMessage(content="looks odd"),
         AIMessage(content="sorry, I cannot produce JSON today"),
-        # fallback suggestions still compile into a runnable plan
-        tool_call_message("convert_types", {"column_type_map": {"age": "float"}}, "c1"),
-        tool_call_message("remove_duplicates", {}, "c2"),
-        tool_call_message("handle_missing", {"strategy": "median", "columns": ["age"]}, "c3"),
-        tool_call_message("clean_text", {"columns": ["city"], "actions": ["strip"]}, "c4"),
+        # fallback suggestions compile into a fully-specified plan that
+        # executes mechanically - no further model calls needed
     ]
     llm = make_scripted_llm(messages)
     monkeypatch.setattr(nodes, "build_llm", lambda *a, **k: llm)

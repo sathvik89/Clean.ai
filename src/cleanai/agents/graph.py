@@ -15,7 +15,7 @@ from langgraph.graph import END, StateGraph
 
 from cleanai.agents.nodes import (
     analyzer_node, eda_node, executor_node, human_review_node,
-    tool_handler_node, validator_node,
+    mech_node, step_fully_specified, tool_handler_node, validator_node,
 )
 from cleanai.agents.state import AgentState
 from cleanai.config import get_settings
@@ -43,15 +43,24 @@ def route_after_executor(state: AgentState) -> str:
     return "validator"
 
 
-def route_after_tools(state: AgentState) -> str:
+def route_next_step(state: AgentState) -> str:
+    """After review, mech or tools: decide who handles the next plan step.
+
+    Fully-specified steps run mechanically (no LLM, no drift); only steps
+    that still need judgment or parameters go to the model.
+    """
     settings = get_settings()
     if state["tool_rounds"] >= settings.max_tool_rounds:
         return "validator"
     if state["mode"] == "repair":
         # re-check after every repair round so the run ends as soon as it's clean
         return "validator"
-    if state["current_step_index"] >= len(state["plan_steps"]):
+    index = state["current_step_index"]
+    steps = state["plan_steps"]
+    if index >= len(steps):
         return "validator"
+    if step_fully_specified(steps[index]):
+        return "mech"
     return "executor"
 
 
@@ -67,15 +76,17 @@ def build_graph(checkpointer=None, with_human_review: bool = True):
     workflow.add_node("eda", eda_node)
     workflow.add_node("human_review", human_review_node)
     workflow.add_node("executor", executor_node)
+    workflow.add_node("mech", mech_node)
     workflow.add_node("tools", tool_handler_node)
     workflow.add_node("validator", validator_node)
 
     workflow.set_entry_point("analyzer")
     workflow.add_edge("analyzer", "eda")
     workflow.add_edge("eda", "human_review")
-    workflow.add_edge("human_review", "executor")
+    workflow.add_conditional_edges("human_review", route_next_step)
+    workflow.add_conditional_edges("mech", route_next_step)
     workflow.add_conditional_edges("executor", route_after_executor)
-    workflow.add_conditional_edges("tools", route_after_tools)
+    workflow.add_conditional_edges("tools", route_next_step)
     workflow.add_conditional_edges("validator", route_after_validator)
 
     if checkpointer is None:
